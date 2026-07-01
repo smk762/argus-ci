@@ -1,0 +1,82 @@
+name: Python CI (reusable)
+
+# Reusable CI for the Argus suite (uv + ruff + pytest + build).
+# Callers: see argus-curator / argus-lens .github/workflows/ci.yml.
+#
+# NOTE: release/publish is intentionally NOT reusable here — PyPI trusted
+# publishing (OIDC) cannot run inside a reusable workflow, so each repo keeps a
+# top-level release.yml. The argus-pkg-template repo is the source of truth for
+# that file.
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: "JSON array of Python versions for the test matrix."
+        type: string
+        default: '["3.11", "3.12"]'
+      test-extras:
+        description: 'Extras installed for tests, e.g. "dev" or "dev,server,cli".'
+        type: string
+        default: "dev"
+      ruff-version:
+        description: 'Pin for ruff via uvx (e.g. "0.15.16"); empty uses latest.'
+        type: string
+        default: ""
+      lint-paths:
+        description: "Paths passed to ruff check / format."
+        type: string
+        default: "src/ tests/"
+      post-test:
+        description: "Optional command run after pytest in the test env (e.g. a schema check)."
+        type: string
+        default: ""
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: ruff check
+        run: uvx ruff${{ inputs.ruff-version != '' && format('@{0}', inputs.ruff-version) || '' }} check ${{ inputs.lint-paths }}
+      - name: ruff format --check
+        run: uvx ruff${{ inputs.ruff-version != '' && format('@{0}', inputs.ruff-version) || '' }} format --check ${{ inputs.lint-paths }}
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # hatch-vcs derives the dev version from git history
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv venv --python ${{ matrix.python-version }}
+      - run: uv pip install -e ".[${{ inputs.test-extras }}]"
+      - run: uv run --no-sync pytest --tb=short -q
+      - name: Post-test checks
+        if: inputs.post-test != ''
+        run: ${{ inputs.post-test }}
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14

@@ -1,7 +1,7 @@
 # argus-ci
 
 Shared, reusable GitHub Actions workflows for the [Argus suite](https://github.com/smk762?tab=repositories&q=argus)
-(`argus-quarry` → `argus-curator` → `argus-lens`, orchestrated by `argus-vision-demo`).
+(`argus-quarry` → `argus-curator` → `argus-lens`, orchestrated by `argus-studio`).
 
 The goal is one place to define the `uv` + `ruff` + `pytest` + `build` pipeline so
 every repo stays in lockstep instead of drifting.

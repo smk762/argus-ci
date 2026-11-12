@@ -1,0 +1,49 @@
+# Checks that a repo is on the Argus suite map (argus-cortex SUITE.md) and that
+# its CLAUDE.md imports the map. Works for any repo (Python or UI): no toolchain.
+# On a release tag it also prints a reminder to confirm the repo's row is current.
+name: suite-check
+
+on:
+  workflow_call:
+    inputs:
+      repo-name:
+        description: "Name of the row in SUITE.md (default: this repository's name)"
+        type: string
+        default: ""
+      suite-url:
+        description: "Where the canonical suite map lives"
+        type: string
+        default: "https://raw.githubusercontent.com/smk762/argus-cortex/main/SUITE.md"
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the suite block and the map row
+        env:
+          NAME: ${{ inputs.repo-name || github.event.repository.name }}
+          SUITE_URL: ${{ inputs.suite-url }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -eu
+          fail=0
+          if ! grep -q '<!-- argus-suite' CLAUDE.md 2>/dev/null; then
+            echo "::error file=CLAUDE.md::CLAUDE.md lacks the argus-suite block. Copy it from the end of argus-cortex's SUITE.md."
+            fail=1
+          fi
+          # Cortex checks its own working copy, so a PR that edits the map is checked against itself.
+          if [ "$NAME" = "argus-cortex" ] && [ -f SUITE.md ]; then cp SUITE.md /tmp/SUITE.md
+          else curl -fsSL "$SUITE_URL" -o /tmp/SUITE.md; fi
+          row=$(grep -E "^\| \*\*${NAME}\*\* \|" /tmp/SUITE.md || true)
+          if [ -z "$row" ]; then
+            echo "::error::${NAME} has no row in SUITE.md. Add one to argus-cortex before releasing."
+            fail=1
+          elif [ "$REF_TYPE" = "tag" ]; then
+            echo "::notice title=Suite map::Releasing ${NAME} ${REF_NAME}. If this release changed a capability, endpoint, port, UI pairing or dependency, update its SUITE.md row in argus-cortex. Current row: ${row}"
+          fi
+          exit "$fail"

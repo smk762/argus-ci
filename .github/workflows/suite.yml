@@ -1,0 +1,10 @@
+name: Suite
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  suite:
+    uses: ./.github/workflows/suite-check.yml

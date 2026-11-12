@@ -13,7 +13,7 @@ on:
       suite-url:
         description: "Where the canonical suite map lives"
         type: string
-        default: "https://raw.githubusercontent.com/smk762/argus-cortex/main/SUITE.md"
+        default: "https://raw.githubusercontent.com/smk762/argus-cortex/dev/SUITE.md"
 
 permissions:
   contents: read

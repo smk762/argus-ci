@@ -19,9 +19,9 @@ Add a caller in the consuming repo at `.github/workflows/ci.yml`:
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -57,17 +57,17 @@ what the repo offers. It needs no toolchain, so UI repos use it too. Add `.githu
 name: Suite
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
 
 jobs:
   suite:
     uses: smk762/argus-ci/.github/workflows/suite-check.yml@v1
 ```
 
-Inputs: `repo-name` (default: the repository's name), `suite-url` (default: cortex `main`).
+Inputs: `repo-name` (default: the repository's name), `suite-url` (default: cortex `dev`).
 
 ## Why release/publish is **not** here
 

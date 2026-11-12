@@ -1,7 +1,7 @@
 # argus-ci
 
 Shared, reusable GitHub Actions workflows for the [Argus suite](https://github.com/smk762?tab=repositories&q=argus)
-(the map of every repo is [argus-cortex's SUITE.md](https://github.com/smk762/argus-cortex/blob/main/SUITE.md)).
+(the map of every repo is [argus-cortex's SUITE.md](https://github.com/smk762/argus-cortex/blob/dev/SUITE.md)).
 
 The goal is one place to define the `uv` + `ruff` + `pytest` + `build` pipeline so
 every repo stays in lockstep instead of drifting.
@@ -48,7 +48,7 @@ jobs:
 
 ## `suite-check.yml`
 
-Keeps a repo on the [suite map](https://github.com/smk762/argus-cortex/blob/main/SUITE.md) that agents
+Keeps a repo on the [suite map](https://github.com/smk762/argus-cortex/blob/dev/SUITE.md) that agents
 read. It fails when the repo's `CLAUDE.md` lacks the `<!-- argus-suite` block, or when `SUITE.md` has no
 `| **<repo>** |` row. On a release tag it prints the row as a reminder to update it if the release changed
 what the repo offers. It needs no toolchain, so UI repos use it too. Add `.github/workflows/suite.yml`:

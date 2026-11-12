@@ -23,6 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            CLAUDE.md
+            SUITE.md
+          sparse-checkout-cone-mode: false
       - name: Check the suite block and the map row
         env:
           NAME: ${{ inputs.repo-name || github.event.repository.name }}
@@ -37,9 +42,14 @@ jobs:
             fail=1
           fi
           # Cortex checks its own working copy, so a PR that edits the map is checked against itself.
-          if [ "$NAME" = "argus-cortex" ] && [ -f SUITE.md ]; then cp SUITE.md /tmp/SUITE.md
-          else curl -fsSL "$SUITE_URL" -o /tmp/SUITE.md; fi
-          row=$(grep -E "^\| \*\*${NAME}\*\* \|" /tmp/SUITE.md || true)
+          map="$RUNNER_TEMP/SUITE.md"
+          if [ "$NAME" = "argus-cortex" ] && [ -f SUITE.md ]; then cp SUITE.md "$map"
+          elif ! curl -fsSL --retry 3 --retry-all-errors "$SUITE_URL" -o "$map"; then
+            echo "::error::Could not fetch the suite map from ${SUITE_URL}."
+            exit 1
+          fi
+          # Literal prefix match (repo names may contain regex metacharacters); first row only.
+          row=$(awk -v r="| **${NAME}** |" 'index($0, r) == 1 { print; exit }' "$map")
           if [ -z "$row" ]; then
             echo "::error::${NAME} has no row in SUITE.md. Add one to argus-cortex before releasing."
             fail=1

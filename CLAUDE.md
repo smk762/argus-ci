@@ -22,7 +22,9 @@ Not checked out? Read https://github.com/smk762/argus-cortex/blob/main/SUITE.md
 
 ```
 .github/workflows/
-  python-ci.yml   # the only reusable workflow (`on: workflow_call`)
+  python-ci.yml     # reusable Python pipeline (`on: workflow_call`)
+  suite-check.yml   # reusable suite-map check: CLAUDE.md block + SUITE.md row (`on: workflow_call`)
+  suite.yml         # this repo's own caller of suite-check.yml
 README.md         # source of truth for the caller-facing usage + inputs table
 ```
 

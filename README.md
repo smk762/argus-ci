@@ -1,7 +1,7 @@
 # argus-ci
 
 Shared, reusable GitHub Actions workflows for the [Argus suite](https://github.com/smk762?tab=repositories&q=argus)
-(`argus-quarry` → `argus-curator` → `argus-lens`, orchestrated by `argus-studio`).
+(the map of every repo is [argus-cortex's SUITE.md](https://github.com/smk762/argus-cortex/blob/main/SUITE.md)).
 
 The goal is one place to define the `uv` + `ruff` + `pytest` + `build` pipeline so
 every repo stays in lockstep instead of drifting.
@@ -45,6 +45,29 @@ jobs:
 | `ruff-version`    | `""`                 | Pin ruff via `uvx` (e.g. `0.15.16`); empty = latest.         |
 | `lint-paths`      | `src/ tests/`        | Paths passed to `ruff check` / `ruff format --check`.        |
 | `post-test`       | `""`                 | Extra command run in the test env after pytest.              |
+
+## `suite-check.yml`
+
+Keeps a repo on the [suite map](https://github.com/smk762/argus-cortex/blob/main/SUITE.md) that agents
+read. It fails when the repo's `CLAUDE.md` lacks the `<!-- argus-suite` block, or when `SUITE.md` has no
+`| **<repo>** |` row. On a release tag it prints the row as a reminder to update it if the release changed
+what the repo offers. It needs no toolchain, so UI repos use it too. Add `.github/workflows/suite.yml`:
+
+```yaml
+name: Suite
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  suite:
+    uses: smk762/argus-ci/.github/workflows/suite-check.yml@v1
+```
+
+Inputs: `repo-name` (default: the repository's name), `suite-url` (default: cortex `main`).
 
 ## Why release/publish is **not** here
 

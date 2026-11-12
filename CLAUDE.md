@@ -4,15 +4,27 @@ Guidance for AI agents working in this repo. Human-facing usage lives in [README
 
 ## What this is
 
-**Not a package** — no `src/`, no `pyproject.toml`, no tests to run here. This repo is the shared **reusable GitHub Actions workflows** for the [Argus suite](https://github.com/smk762?tab=repositories&q=argus) (`argus-quarry` → `argus-curator` → `argus-lens`, orchestrated by `argus-studio`). One place to define the `uv` + `ruff` + `pytest` + `build` pipeline so every downstream repo stays in lockstep instead of drifting.
+**Not a package** — no `src/`, no `pyproject.toml`, no tests to run here. This repo is the shared **reusable GitHub Actions workflows** for the Argus suite. One place to define the `uv` + `ruff` + `pytest` + `build` pipeline so every downstream repo stays in lockstep instead of drifting.
 
 Editing a file here changes CI for **every consumer at once**. The contract you are maintaining is the set of `workflow_call` inputs and the steps they drive — treat inputs like a public API.
+
+## Argus suite
+<!-- argus-suite: keep this block; argus-ci checks for it -->
+This repo is part of the Argus suite. The suite map below lists every sibling and what it owns; check it before
+building something a sibling may already do. **On every release, update this repo's row and capabilities in
+argus-cortex's SUITE.md** (a PR to argus-cortex in the same release).
+
+@../argus-core/SUITE.md
+
+Not checked out? Read https://github.com/smk762/argus-cortex/blob/main/SUITE.md
 
 ## Layout
 
 ```
 .github/workflows/
-  python-ci.yml   # the only reusable workflow (`on: workflow_call`)
+  python-ci.yml     # reusable Python pipeline (`on: workflow_call`)
+  suite-check.yml   # reusable suite-map check: CLAUDE.md block + SUITE.md row (`on: workflow_call`)
+  suite.yml         # this repo's own caller of suite-check.yml
 README.md         # source of truth for the caller-facing usage + inputs table
 ```
 

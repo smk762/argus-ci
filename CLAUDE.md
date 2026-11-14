@@ -61,3 +61,7 @@ There is no local test harness in this repo. To validate a workflow edit before 
 - **`uv run --no-sync`** everywhere — the editable install is already done in a prior step; `--no-sync` stops uv re-resolving and re-installing.
 - **`post-test` runs arbitrary caller-supplied shell** in the test env by design (schema checks, extra gates). That's expected; keep it opt-in and empty by default.
 - **Pin third-party actions to a major tag** (`@v4`, `@v6`) as the existing steps do; keep them consistent when bumping.
+
+## Branches
+
+`dev` is the default branch and the base for every PR. Cut feature branches from `origin/dev` and bring them up to date by merging `origin/dev`, never `main`. Never open a PR against `main` or push work to it directly: `main` must never be ahead of `dev`. A release fast-forwards `main` to a `dev` commit that passed CI (`git push origin origin/dev:main`), then tags it. If `main` is protected and needs a PR, merge the release PR, then immediately merge `main` back into `dev` so the merge commit is not left on `main` alone.

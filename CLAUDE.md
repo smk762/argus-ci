@@ -60,7 +60,7 @@ There is no local test harness in this repo. To validate a workflow edit before 
 - **Ruff is unpinned by default** (`ruff-version: ""` → latest). Consumers wanting reproducible lint pass an explicit pin (e.g. `0.15.16`); the `format('@{0}', …)` expression wires that into the `uvx ruff@<ver>` invocation.
 - **`uv run --no-sync`** everywhere — the editable install is already done in a prior step; `--no-sync` stops uv re-resolving and re-installing.
 - **`post-test` runs arbitrary caller-supplied shell** in the test env by design (schema checks, extra gates). That's expected; keep it opt-in and empty by default.
-- **Pin third-party actions to a major tag** (`@v4`, `@v6`) as the existing steps do; keep them consistent when bumping.
+- **Pin third-party actions to a major tag** (`@v7`) as the existing steps do; keep them consistent when bumping. `astral-sh/setup-uv` stopped publishing floating major tags after `v7` (later releases are full semver only), so moving past `@v7` means a full version pin.
 
 ## Branches
 

@@ -92,7 +92,7 @@ jobs:
           # Mask each denylist term so a hit never echoes the term into a public log.
           printf '%s\n' "$DENYLIST" | while IFS= read -r t; do
             t=$(printf '%s' "$t" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-            [ -n "$t" ] && echo "::add-mask::$t"
+            if [ -n "$t" ]; then echo "::add-mask::$t"; fi
           done
           git ls-files -z -- README.md ':(glob)docs/**/*.md' > "$RUNNER_TEMP/docs.lst"
           python3 - "$RUNNER_TEMP/docs.lst" <<'PY'

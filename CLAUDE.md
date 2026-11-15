@@ -24,6 +24,7 @@ Not checked out? Read https://github.com/smk762/argus-cortex/blob/dev/SUITE.md
 .github/workflows/
   python-ci.yml     # reusable Python pipeline (`on: workflow_call`)
   suite-check.yml   # reusable suite-map check: CLAUDE.md block + SUITE.md row (`on: workflow_call`)
+  docs-check.yml    # reusable docs check: Typer CLI reference drift + published-docs hygiene scan
   suite.yml         # this repo's own caller of suite-check.yml
 README.md         # source of truth for the caller-facing usage + inputs table
 ```
@@ -55,7 +56,8 @@ There is no local test harness in this repo. To validate a workflow edit before 
 
 - **Every change is a fleet change.** A broken step or a renamed/removed input breaks CI in all consumers simultaneously. Add inputs with safe defaults; treat removing or renaming one as breaking.
 - **Versioning by moving major tags.** Consumers pin `@v1`. Backward-compatible changes: fast-forward `v1` to the new commit (`git tag -f v1 <sha> && git push -f origin v1`). Breaking input changes: cut a new `v2` and leave `v1` where it is.
-- **No `secrets:` block today.** This workflow takes only `inputs:` — it needs no repo secrets and passes none through. If you add one, declare it under `workflow_call.secrets` and document that callers must forward it (`secrets: inherit` or explicit).
+- **Secrets.** `python-ci.yml` and `suite-check.yml` take only `inputs:`. `docs-check.yml` declares one optional secret, `denylist`, under `workflow_call.secrets`; callers forward it explicitly. Any new secret must be `required: false` (fork PRs get none) and documented in the README. Never echo a secret-derived value without `::add-mask::` first.
+- **`docs-check` hygiene regexes are a fleet gate.** Widening a pattern can fail every consumer at once. Run the scanner over the sibling repos' `README.md` + `docs/**/*.md` before changing it.
 - **Release/publish is deliberately NOT here.** PyPI [trusted publishing (OIDC) cannot run inside a reusable workflow](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github) — the `job_workflow_ref` check rejects it. Each repo keeps a **top-level** `release.yml`; its canonical form lives in [`argus-pkg-template`](https://github.com/smk762/argus-pkg-template) (`copier update` to re-sync). Do not try to fold release into this file.
 - **Ruff is unpinned by default** (`ruff-version: ""` → latest). Consumers wanting reproducible lint pass an explicit pin (e.g. `0.15.16`); the `format('@{0}', …)` expression wires that into the `uvx ruff@<ver>` invocation.
 - **`uv run --no-sync`** everywhere — the editable install is already done in a prior step; `--no-sync` stops uv re-resolving and re-installing.

@@ -1,0 +1,35 @@
+name: suite-rules self-test
+
+# Every rule must fire on its positive fixture and stay silent on its negative one, and the
+# baseline/ratchet logic must hold. ai-code-auditor's rules.fixtures gate runs the same check.
+
+on:
+  pull_request:
+    paths: ["suite-rules/**", ".github/workflows/suite-rules*.yml"]
+  push:
+    branches: [dev]
+    paths: ["suite-rules/**", ".github/workflows/suite-rules*.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Tool pins from the catalogue
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import tomllib
+          t = tomllib.load(open("suite-rules/catalogue.toml", "rb"))["tools"]
+          print(f"RUFF=uvx ruff@{t['ruff']}")
+          print(f"SEMGREP=uvx --from semgrep=={t['semgrep']} semgrep")
+          PY
+      - run: python3 -m unittest suite-rules/test_check.py
+      - run: python3 suite-rules/check.py fixtures
+      - name: Generated rules are up to date
+        run: |
+          python3 suite-rules/semgrep/_generate.py
+          git diff --exit-code suite-rules/semgrep/

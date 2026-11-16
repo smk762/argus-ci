@@ -123,6 +123,45 @@ To regenerate the reference locally, run `uv run python -m typer argus_curator.c
 Secret: `denylist` (optional). It holds newline-separated private terms, matched case-insensitively. It is
 never committed. A secret is not passed to pull requests from forks, so the denylist is skipped there.
 
+## `suite-rules.yml`
+
+Lint rules that each eliminate a class of mistake found across the suite (missing timeouts,
+request input reaching the filesystem or an outbound URL, secrets compared with `==`…). The
+catalogue is [`suite-rules/catalogue.toml`](suite-rules/catalogue.toml): every rule names its
+finding class and has a positive and a negative fixture, and
+`suite-rules-self-test.yml` proves each one fires on the first and stays silent on the second.
+ai-code-auditor scans with the same catalogue, so its findings and CI agree.
+
+It's opt-in. Existing violations are recorded in the repo's `.suite-rules-baseline.json`: CI fails
+on **new** violations only, and on a pull request the baseline may only shrink compared with the base
+branch.
+
+```yaml
+jobs:
+  suite-rules:
+    uses: smk762/argus-ci/.github/workflows/suite-rules.yml@v1
+```
+
+To adopt it, write the baseline from an argus-ci checkout and commit it with the job:
+
+```bash
+RUFF="uvx ruff@0.15.16" SEMGREP="uvx --from semgrep==1.180.0 semgrep" \
+  python3 suite-rules/check.py baseline --root ../argus-<repo>
+```
+
+To silence one hit for a reason, add `# noqa: <code>` (ruff rules) or `# nosemgrep: <rule-id>`
+on that line, with the reason in the comment. When you fix baselined hits, run `baseline` again so
+the file shrinks.
+
+| Input | Default | Meaning |
+|---|---|---|
+| `rules-ref` | `v1` | argus-ci ref the catalogue is read from. Keep it in step with the `@ref` you call. |
+| `paths` | `.` | Space-separated paths to scan. |
+
+Tool versions are pinned in the catalogue (`[tools]`). `silent-except` is a *convention* rule: a
+deliberate swallow must say so (`contextlib.suppress(...)` with a comment), so the real silent
+failures stand out.
+
 ## Why release/publish is **not** here
 
 PyPI [trusted publishing cannot run inside a reusable workflow](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github)

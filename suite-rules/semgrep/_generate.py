@@ -165,10 +165,10 @@ def rule(rid: str, cls: str, message: str, sinks: str) -> str:
 
 (HERE / "request-path-to-fs.yml").write_text(rule(
     "request-path-to-fs", "path_traversal",
-    "Request input reaches a filesystem path. Resolve it under a fixed root and reject anything outside.",
+    "Request input reaches a filesystem path. Use argus_cortex.fs.safe_join(root, value), or safe_name for a single id, which returns the resolved path under root or raises PathRefused.",
     PATH_SINKS))
 (HERE / "request-url-outbound.yml").write_text(rule(
     "request-url-outbound", "ssrf",
-    "Request input becomes the URL of an outbound call (SSRF). Allow-list the host first.",
+    "Request input becomes the URL of an outbound call (SSRF). Fetch it with argus_cortex.net.fetch / afetch, which checks every resolved address, pins the connection and re-checks redirects; pass allow_hosts for internal services.",
     URL_SINKS))
 print("wrote request-path-to-fs.yml, request-url-outbound.yml")

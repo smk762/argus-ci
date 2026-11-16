@@ -52,21 +52,21 @@ id = "request-path-to-fs"
 class = "path_traversal"
 tool = "semgrep"
 severity = "HIGH"
-message = "Request input reaches a filesystem path. Resolve it under a fixed root and reject anything outside."
+message = "Request input reaches a filesystem path. Use argus_cortex.fs.safe_join(root, value), or safe_name for a single id, which returns the resolved path under root or raises PathRefused."
 
 [[rules]]
 id = "request-url-outbound"
 class = "ssrf"
 tool = "semgrep"
 severity = "HIGH"
-message = "Request input becomes the URL of an outbound call (SSRF). Allow-list the host first."
+message = "Request input becomes the URL of an outbound call (SSRF). Fetch it with argus_cortex.net.fetch / afetch, which checks every resolved address, pins the connection and re-checks redirects; pass allow_hosts for internal services."
 
 [[rules]]
 id = "token-compare"
 class = "secret_exposure"
 tool = "semgrep"
 severity = "MEDIUM"
-message = "A secret is compared with == or !=, which leaks it through timing. Use hmac.compare_digest."
+message = "A secret is compared with == or !=, which leaks it through timing. For an admin route use argus_cortex.auth.bearer(...); otherwise hmac.compare_digest on bytes."
 
 [[rules]]
 id = "agpl-import"

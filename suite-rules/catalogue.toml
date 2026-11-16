@@ -1,0 +1,69 @@
+# Suite rule catalogue (ai-code-auditor #55).
+#
+# Each rule eliminates one finding class (ai-code-auditor config/finding_classes.yaml) and has a
+# positive and a negative fixture under fixtures/<id>/. `python suite-rules/check.py fixtures`
+# proves every rule fires on its positive fixture and stays silent on its negative one, here in
+# argus-ci's own CI and in ai-code-auditor's rules.fixtures gate.
+#
+# A repo opts in through the suite-rules.yml reusable workflow. Existing violations live in the
+# repo's .suite-rules-baseline.json: CI fails on new ones only, and the baseline may only shrink.
+# To silence one hit for a reason, use `# noqa: <code>` (ruff) or `# nosemgrep: <id>` (semgrep)
+# on that line, with the reason in the comment.
+#
+# kind = "guard" (default) eliminates the class; kind = "convention" enforces a code shape that
+# keeps the class visible, and its hits are not counted as findings of the class.
+
+version = 1
+
+[tools]
+ruff = "0.15.16"
+semgrep = "1.180.0"
+
+[[rules]]
+id = "missing-timeout"
+class = "missing_timeout"
+tool = "ruff"
+codes = ["S113"]
+severity = "MEDIUM"
+message = "An HTTP call without a timeout can hang its worker forever. Pass timeout=..."
+
+[[rules]]
+id = "silent-except"
+class = "silent_failure"
+# A convention, not a bug detector: most bare swallows in the suite are deliberate best-effort
+# calls (cache frees, GPU probes). The rule makes that intent explicit, so the few real silent
+# failures stand out. The auditor doesn't count its hits as silent_failure findings.
+kind = "convention"
+tool = "ruff"
+codes = ["S110", "S112"]
+severity = "LOW"
+message = "A bare except-pass/continue hides failures. If the swallow is deliberate, write contextlib.suppress(...) with a comment; otherwise log it or narrow the except."
+
+[[rules]]
+id = "predictable-tmp"
+class = "path_traversal"
+tool = "ruff"
+codes = ["S108"]
+severity = "LOW"
+message = "A fixed /tmp path can be planted by another user. Use tempfile.mkstemp / TemporaryDirectory."
+
+[[rules]]
+id = "request-path-to-fs"
+class = "path_traversal"
+tool = "semgrep"
+severity = "HIGH"
+message = "Request input reaches a filesystem path. Resolve it under a fixed root and reject anything outside."
+
+[[rules]]
+id = "request-url-outbound"
+class = "ssrf"
+tool = "semgrep"
+severity = "HIGH"
+message = "Request input becomes the URL of an outbound call (SSRF). Allow-list the host first."
+
+[[rules]]
+id = "token-compare"
+class = "secret_exposure"
+tool = "semgrep"
+severity = "MEDIUM"
+message = "A secret is compared with == or !=, which leaks it through timing. Use hmac.compare_digest."

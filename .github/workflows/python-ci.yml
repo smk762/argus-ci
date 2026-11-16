@@ -32,6 +32,9 @@ on:
         type: string
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest

@@ -1,0 +1,37 @@
+name: self-check
+
+# Every consumer pins @v1, so this repo checks its own workflows before they reach anyone:
+#   actionlint: syntax, expressions and shellcheck over every workflow;
+#   workflows: every workflow has least-privilege `permissions:` and no `pull_request_target`; no reusable workflow loses an input or secret, changes a type, or adds a required one
+#     compared with BASE. A deliberate break goes to a new major: set BASE to that tag in the same PR.
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+env:
+  BASE: v1
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the BASE tag
+      - uses: astral-sh/setup-uv@v7
+      - run: uv run --no-project --with pyyaml python -m unittest scripts/test_check_workflows.py
+      - run: uv run --no-project --with pyyaml python scripts/check_workflows.py "$BASE"

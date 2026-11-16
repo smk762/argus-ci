@@ -1,0 +1,22 @@
+rules:
+  - id: agpl-import
+    languages: [python]
+    severity: ERROR
+    message: >-
+      An AGPL package is imported in-process, which puts this package under the AGPL. Call it over HTTP from its own
+      service instead (argus_cortex.moderation.NudeNetClient is the pattern). A sidecar that exists to serve the
+      package over HTTP marks its import with a reasoned `# nosemgrep: agpl-import`.
+    metadata:
+      class: licence_violation
+      catalogue: argus-ci/suite-rules
+    pattern-either:
+      - pattern: import nudenet
+      - pattern: import nudenet.$M
+      - pattern: from nudenet import $X
+      - pattern: from nudenet.$M import $X
+      - pattern: import ultralytics
+      - pattern: import ultralytics.$M
+      - pattern: from ultralytics import $X
+      - pattern: from ultralytics.$M import $X
+      - pattern: importlib.import_module("=~/^(nudenet|ultralytics)(\..*)?$/")
+      - pattern: __import__("=~/^(nudenet|ultralytics)(\..*)?$/")

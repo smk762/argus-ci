@@ -67,3 +67,10 @@ class = "secret_exposure"
 tool = "semgrep"
 severity = "MEDIUM"
 message = "A secret is compared with == or !=, which leaks it through timing. Use hmac.compare_digest."
+
+[[rules]]
+id = "agpl-import"
+class = "licence_violation"
+tool = "semgrep"
+severity = "HIGH"
+message = "An AGPL package (nudenet, ultralytics) is imported in-process, which puts this package under the AGPL. Call it over HTTP from its own service, as argus_cortex.moderation does."

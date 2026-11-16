@@ -3,7 +3,7 @@ rules:
     languages: [python]
     severity: WARNING
     message: >-
-      A secret is compared with == or !=, which leaks it through timing. Use hmac.compare_digest.
+      A secret is compared with == or !=, which leaks it through timing. For an admin route use argus_cortex.auth.bearer(...); otherwise hmac.compare_digest on bytes.
     metadata:
       class: secret_exposure
       catalogue: argus-ci/suite-rules

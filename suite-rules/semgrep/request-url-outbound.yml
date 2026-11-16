@@ -8,7 +8,7 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      Request input becomes the URL of an outbound call (SSRF). Allow-list the host first.
+      Request input becomes the URL of an outbound call (SSRF). Fetch it with argus_cortex.net.fetch / afetch, which checks every resolved address, pins the connection and re-checks redirects; pass allow_hosts for internal services.
     metadata:
       class: ssrf
       catalogue: argus-ci/suite-rules

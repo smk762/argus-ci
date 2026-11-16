@@ -26,3 +26,10 @@ def preview(url: str):
 async def models(page: int):
     async with httpx.AsyncClient(timeout=5) as client:
         return (await client.get(BASE + "/models", params={"page": page})).json()
+
+
+@app.post("/fetch")
+def fetch_image(url: str):
+    from argus_cortex.net import fetch
+
+    return fetch(url, timeout=5, max_bytes=1_000_000).raise_for_status().body

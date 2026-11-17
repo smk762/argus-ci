@@ -1,0 +1,41 @@
+rules:
+  - id: handler-scans-all
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A route handler lists or walks a directory on every request, so its cost grows with the data and concurrent
+      requests queue behind it. Keep an index updated on write (or cached by mtime) and look items up by key. Only
+      calls written in the handler itself are seen, not ones in functions it calls. A listing that is bounded by
+      design (a fixed, small directory) marks the line with a reasoned `# nosemgrep: handler-scans-all`.
+    metadata:
+      class: unbounded_resource
+      catalogue: argus-ci/suite-rules
+    paths:
+      exclude:
+        - "tests/"
+        - "test_*.py"
+        - "*_test.py"
+        - "conftest.py"
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              @$APP.$METHOD(...)
+              def $FUNC(...):
+                ...
+          - pattern-inside: |
+              @$APP.$METHOD(...)
+              async def $FUNC(...):
+                ...
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(get|post|put|patch|delete|api_route|route|websocket)$
+      - pattern-either:
+          - pattern: $P.glob(...)
+          - pattern: $P.rglob(...)
+          - pattern: $P.iterdir()
+          - pattern: $P.walk(...)
+          - pattern: os.walk(...)
+          - pattern: os.listdir(...)
+          - pattern: os.scandir(...)
+          - pattern: glob.glob(...)
+          - pattern: glob.iglob(...)

@@ -74,3 +74,25 @@ class = "licence_violation"
 tool = "semgrep"
 severity = "HIGH"
 message = "An AGPL package (nudenet, ultralytics) is imported in-process, which puts this package under the AGPL. Call it over HTTP from its own service, as argus_cortex.moderation does."
+
+[[rules]]
+id = "blocking-in-async"
+class = "blocking_io_async"
+tool = "ruff"
+# flake8-async: blocking HTTP (requests, urllib, httpx sync), subprocesses, open() and time.sleep
+# inside `async def`. One such call freezes the whole event loop: every other request on that
+# worker waits until it returns, and a hang there wedges the server. ASYNC240 (Path.exists,
+# .resolve, .mkdir...) is left out: on local disks those are microsecond stat calls, and across
+# the suite it was nearly all of this rule's hits.
+codes = ["ASYNC210", "ASYNC212", "ASYNC220", "ASYNC221", "ASYNC222", "ASYNC230", "ASYNC251"]
+severity = "MEDIUM"
+message = "A blocking call inside async def stalls the event loop, so every other request on the worker waits. Await an async client (httpx.AsyncClient, asyncio.create_subprocess_exec, asyncio.sleep), or run it with await asyncio.to_thread(...)."
+
+[[rules]]
+id = "handler-scans-all"
+class = "unbounded_resource"
+tool = "semgrep"
+# LOW: many hits are listing endpoints over directories that stay small; those take a reasoned
+# nosemgrep. The ones that grow with use (jobs, uploads, generated items) are the real cost.
+severity = "LOW"
+message = "A route handler lists or walks a directory on every request, so its cost grows with the data and concurrent requests queue behind it. Keep an index updated on write (or cached by mtime) and look items up by key."

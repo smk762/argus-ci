@@ -188,13 +188,17 @@ def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None =
     return {"new": new, "fixed": fixed, "grew": grew}
 
 
+def _fixture_files(d: Path, prefix: str) -> list[Path]:
+    return sorted(p for p in d.glob(f"{prefix}*") if p.is_file())
+
+
 def fixtures(rules: list[Rule] | None = None) -> list[dict]:
-    """Every rule must fire on fixtures/<id>/positive.* and stay silent on negative.*."""
+    """Every rule must fire on each fixtures/<id>/positive.* file and stay silent on every negative.*."""
     rules = rules if rules is not None else load_rules()[0]
     out = []
     for r in rules:
         d = HERE / "fixtures" / r.id
-        pos, neg = sorted(d.glob("positive*.py")), sorted(d.glob("negative*.py"))
+        pos, neg = _fixture_files(d, "positive"), _fixture_files(d, "negative")
         res = {"rule": r.id, "class": r.cls, "kind": r.kind, "tool": r.tool, "ok": False, "positive_hits": 0, "negative_hits": 0,
                "note": ""}
         if not pos or not neg:
@@ -208,10 +212,12 @@ def fixtures(rules: list[Rule] | None = None) -> list[dict]:
             res["note"] = str(exc)[:300]
             out.append(res)
             continue
-        res.update(positive_hits=len(hp), negative_hits=len(hn), ok=bool(hp) and not hn,
-                   negative_lines=[h.line for h in hn])
-        if not hp:
-            res["note"] = "silent on its positive fixture"
+        fired = {Path(h.path).as_posix() for h in hp}
+        silent = [p.name for p in pos if p.name not in fired]
+        res.update(positive_hits=len(hp), negative_hits=len(hn), ok=not silent and not hn,
+                   negative_lines=[h.line for h in hn], silent_positives=silent)
+        if silent:
+            res["note"] = f"silent on positive fixture(s): {', '.join(silent)}"
         elif hn:
             res["note"] = f"fires on its negative fixture (lines {', '.join(str(h.line) for h in hn)})"
         out.append(res)

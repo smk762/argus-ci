@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from collections import Counter
 from pathlib import Path
 
@@ -52,8 +53,8 @@ class Catalogue(unittest.TestCase):
         self.assertIn("semgrep", tools)
         for r in rules:
             d = check.HERE / "fixtures" / r.id
-            self.assertTrue(list(d.glob("positive*.py")), r.id)
-            self.assertTrue(list(d.glob("negative*.py")), r.id)
+            self.assertTrue(check._fixture_files(d, "positive"), r.id)
+            self.assertTrue(check._fixture_files(d, "negative"), r.id)
 
     def test_bad_catalogue_is_refused(self):
         with tempfile.TemporaryDirectory() as d:
@@ -64,6 +65,55 @@ class Catalogue(unittest.TestCase):
             p.write_text('[[rules]]\nid = "a"\nclass = "c"\ntool = "ruff"\ncodes = ["S1"]\nkind = "vibes"\nmessage = "m"\n')
             with self.assertRaises(ValueError):
                 check.load_rules(p)
+
+
+class Fixtures(unittest.TestCase):
+    """fixtures() with scanning stubbed: `fires` is the set of file names the fake rule hits."""
+
+    def run_fixtures(self, files: dict[str, str], fires: set[str]) -> dict:
+        rule = check.Rule("r", "c", "semgrep", "LOW", "m")
+        with tempfile.TemporaryDirectory() as d:
+            fx = Path(d) / "fixtures" / "r"
+            fx.mkdir(parents=True)
+            for name, text in files.items():
+                (fx / name).write_text(text)
+
+            def fake_scan(root, paths, **kw):
+                return [check.Hit("r", p, 1, "x") for p in paths if p in fires]
+
+            with mock.patch.object(check, "HERE", Path(d)), mock.patch.object(check, "scan", fake_scan):
+                return check.fixtures([rule])[0]
+
+    def test_non_python_fixtures_are_found(self):
+        res = self.run_fixtures({"positive.yml": "a", "negative.yml": "b"}, {"positive.yml"})
+        self.assertTrue(res["ok"], res)
+
+    def test_every_positive_file_must_fire(self):
+        files = {"positive.py": "a", "positive_2.py": "a", "negative.py": "b"}
+        res = self.run_fixtures(files, {"positive.py"})
+        self.assertFalse(res["ok"])
+        self.assertIn("positive_2.py", res["note"])
+        self.assertTrue(self.run_fixtures(files, {"positive.py", "positive_2.py"})["ok"])
+
+
+sys.path.insert(0, str(check.HERE / "semgrep"))
+import _generate  # noqa: E402
+
+
+class Generate(unittest.TestCase):
+    def test_message_and_class_cannot_break_the_yaml(self):
+        msg, cls = "line one: x\n  - id: zz-smuggled\n# not a comment", "[a]: b # c"
+        lines = _generate.rule("r", cls, msg, "").splitlines()
+        message = next(ln for ln in lines if ln.startswith("    message:"))
+        klass = next(ln for ln in lines if ln.startswith("      class:"))
+        self.assertEqual(json.loads(message.split(":", 1)[1]), msg)
+        self.assertEqual(json.loads(klass.split(":", 1)[1]), cls)
+        self.assertFalse(any("zz-smuggled" in ln for ln in lines if ln is not message))
+
+    def test_starlette_request_sources(self):
+        src = _generate.sources()
+        for p in ("request.headers", "request.cookies", "request.url", "await request.body()", "request.stream()"):
+            self.assertIn(f"- pattern: {p}\n", src + "\n", p)
 
 
 if __name__ == "__main__":

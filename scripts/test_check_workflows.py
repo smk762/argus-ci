@@ -43,6 +43,11 @@ class Compat(unittest.TestCase):
         self.assertEqual(_call(yaml.safe_load("on:\n  workflow_call:\n    inputs: {}\n")), {"inputs": {}})
         self.assertIsNone(_call(yaml.safe_load("on: [push]\n")))
 
+    def test_shorthand_triggers_are_reusable(self):
+        self.assertEqual(_call(yaml.safe_load("on: workflow_call\n")), {})
+        self.assertEqual(_call(yaml.safe_load("on: [workflow_call, push]\n")), {})
+        self.assertIsNone(_call(yaml.safe_load("on: push\n")))
+
 
 class Hygiene(unittest.TestCase):
     def test_permissions_required_and_pull_request_target_refused(self):

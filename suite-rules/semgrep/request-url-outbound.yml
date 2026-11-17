@@ -7,10 +7,9 @@ rules:
       taint_assume_safe_indexes: true
     languages: [python]
     severity: ERROR
-    message: >-
-      Request input becomes the URL of an outbound call (SSRF). Fetch it with argus_cortex.net.fetch / afetch, which checks every resolved address, pins the connection and re-checks redirects; pass allow_hosts for internal services.
+    message: "Request input becomes the URL of an outbound call (SSRF). Fetch it with argus_cortex.net.fetch / afetch, which checks every resolved address, pins the connection and re-checks redirects; pass allow_hosts for internal services."
     metadata:
-      class: ssrf
+      class: "ssrf"
       catalogue: argus-ci/suite-rules
     paths:
       exclude:
@@ -164,8 +163,13 @@ rules:
           - pattern: request.files
           - pattern: request.query_params
           - pattern: request.path_params
+          - pattern: request.headers
+          - pattern: request.cookies
+          - pattern: request.url
           - pattern: await request.json()
           - pattern: await request.form()
+          - pattern: await request.body()
+          - pattern: request.stream()
           - pattern: request.get_json(...)
     pattern-sanitizers:
       - pattern: int(...)

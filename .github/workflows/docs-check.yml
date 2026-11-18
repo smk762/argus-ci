@@ -56,9 +56,19 @@ jobs:
         env:
           PY: ${{ inputs.python-version }}
           EXTRAS: ${{ inputs.install-extras }}
+        # From the consumer's uv.lock when it has one: the reference depends on the Typer version, so an
+        # unlocked install renders whatever Typer released last and fails a docs/cli.md generated from
+        # the lock (argus-survey#62: typer 0.29 added argument types to the reference).
         run: |
-          uv venv --python "$PY"
-          if [ -n "$EXTRAS" ]; then uv pip install -e ".[${EXTRAS}]"; else uv pip install -e .; fi
+          set -eu
+          if [ -f uv.lock ]; then
+            set -- --locked --python "$PY"
+            for extra in $(printf '%s' "$EXTRAS" | tr ',' ' '); do set -- "$@" --extra "$extra"; done
+            uv sync "$@"
+          else
+            uv venv --python "$PY"
+            if [ -n "$EXTRAS" ]; then uv pip install -e ".[${EXTRAS}]"; else uv pip install -e .; fi
+          fi
       - name: Regenerate and compare
         env:
           CLI_MODULE: ${{ inputs.cli-module }}

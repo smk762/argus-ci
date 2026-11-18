@@ -165,6 +165,23 @@ Tool versions are pinned in the catalogue (`[tools]`). `silent-except` is a *con
 deliberate swallow must say so (`contextlib.suppress(...)` with a comment), so the real silent
 failures stand out.
 
+
+### Test prompts
+
+The same job holds every prompt a repo's tests send to a reviewed allowlist, so no sexual, violent
+or illegal text is committed as a test prompt. `check.py prompts` collects the strings given to a
+`prompt`, `user_prompt`, `negative_prompt`, `negative` (or `*_prompt`) keyword, dict key or variable
+in test files, and the same keys in `*.jsonl` under `tests/` or `eval/`. Each one must be a line of
+the repo's `.suite-prompts-allowlist.txt`, so a new prompt shows up in review as its own line.
+
+It's opt-in: the step runs once the allowlist exists. To adopt, review the prompts it finds and commit
+the file:
+
+```sh
+python3 suite-rules/check.py prompts --root ../argus-<repo> --write
+```
+
+Pass extra paths to scan in full, test or not (`check.py prompts --root . demo/`).
 ## Why release/publish is **not** here
 
 PyPI [trusted publishing cannot run inside a reusable workflow](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github)

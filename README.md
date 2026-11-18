@@ -77,6 +77,9 @@ import) correct and clean at every commit. It runs two jobs:
 - **`cli-reference`** regenerates the Typer CLI reference with
   `python -m typer <cli-module> utils docs --name <cli-name> --output <cli-output>`. It fails if the
   committed file differs or is missing. It is skipped when `cli-module` is empty, for a package with no CLI.
+  It installs the package from the repo's `uv.lock` (`uv sync --locked`) when there is one, so the reference
+  is rendered by the locked Typer, the same one that generated the committed file. Without a lock it falls
+  back to `uv pip install -e .`, which takes the newest Typer.
 - **`hygiene`** fails on:
   - RFC 1918 and link-local IPv4 addresses;
   - `/home/<user>`, `/Users/<user>` and `/srv/...` paths;

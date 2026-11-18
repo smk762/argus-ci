@@ -1,10 +1,12 @@
 """Unit tests for the baseline and ratchet (stdlib unittest; the fixtures prove the rules)."""
+import io
 import json
 import sys
 import tempfile
 import unittest
 from unittest import mock
 from collections import Counter
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -44,6 +46,52 @@ class Baseline(unittest.TestCase):
             self.assertEqual(check.read_baseline(p), Counter({hit().key: 2, hit(rule="q", text="a | b").key: 1}))
             self.assertEqual(json.loads(p.read_text())["tools"], {"ruff": "1"})
         self.assertEqual(check.read_baseline(Path("/nonexistent")), Counter())
+
+
+class Prompts(unittest.TestCase):
+    def test_prompt_named_values_are_collected(self):
+        src = (
+            'run(user_prompt="a cat", negative_prompt="blurry", prompt_id="not-a-prompt")\n'
+            'body = {"prompt": f"a {role}  on\\n a rug", "negative": ""}\n'
+            'prompts = ["x", ("y",)]\n'
+            'expanded_prompt: str = "z"\n'
+            'other = "not collected"\n'
+        )
+        self.assertEqual(sorted(check.prompts_in_py(src)), ["a cat", "a {} on a rug", "blurry", "x", "y", "z"])
+
+    def test_jsonl_skips_comments_and_reads_prompt_keys(self):
+        text = '// header\n{"prompt": "a lake", "negative": "blurry", "group": "safe"}\nnot json\n'
+        self.assertEqual(check.prompts_in_jsonl(text), ["a lake", "blurry"])
+
+    def test_only_tests_and_eval_are_scanned_unless_listed(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for rel, text in {
+                "tests/test_a.py": 'run(prompt="in a test")',
+                "src/pkg/app.py": 'run(prompt="in the app")',
+                "demo/markers.py": 'run(prompt="a demo marker")',
+                "eval/probes.jsonl": '{"prompt": "a probe"}',
+                ".venv/lib/test_x.py": 'run(prompt="vendored")',
+            }.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(text)
+            self.assertEqual(sorted(check.collect_prompts(root)), ["a probe", "in a test"])
+            self.assertIn("a demo marker", check.collect_prompts(root, ["demo"]))
+
+    def test_an_unlisted_prompt_fails_until_allowlisted(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_a.py").write_text('run(prompt="a cat")')
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(check.main(["prompts", "--root", d]), 1)
+                self.assertEqual(check.main(["prompts", "--root", d, "--write"]), 0)
+                self.assertEqual(check.main(["prompts", "--root", d]), 0)
+                (root / "tests" / "test_a.py").write_text('run(prompt="a cat")\nrun(prompt="a dog")')
+                self.assertEqual(check.main(["prompts", "--root", d]), 1)
+            self.assertIn("'a dog'", out.getvalue())
+            self.assertEqual(check.read_allowlist(root / check.PROMPT_ALLOWLIST), {"a cat"})
 
 
 class Catalogue(unittest.TestCase):

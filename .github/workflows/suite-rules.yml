@@ -60,3 +60,11 @@ jobs:
         run: |
           # shellcheck disable=SC2086 # PATHS is a space-separated list on purpose
           python3 .argus-ci/suite-rules/check.py check --root . ${BASE_BASELINE:+--base-baseline "$BASE_BASELINE"} $PATHS
+      - name: Test prompts
+        # Opt-in: runs once the repo commits .suite-prompts-allowlist.txt (check.py prompts --write).
+        run: |
+          if [ -f .suite-prompts-allowlist.txt ]; then
+            python3 .argus-ci/suite-rules/check.py prompts --root .
+          else
+            echo "No .suite-prompts-allowlist.txt: test prompts are not checked."
+          fi

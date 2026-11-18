@@ -5,6 +5,7 @@
     python check.py baseline [--root .] [--write .suite-rules-baseline.json]
     python check.py check    [--root .] [--baseline .suite-rules-baseline.json] [--base-baseline FILE]
     python check.py fixtures [--json]
+    python check.py prompts  [--root .] [--allowlist .suite-prompts-allowlist.txt] [--write] [paths ...]
 
 Standard library only (Python 3.11+). ruff and semgrep come from $RUFF and $SEMGREP (default:
 ``ruff`` / ``semgrep`` on PATH), so CI can pin them: RUFF="uvx ruff@0.15.16".
@@ -13,12 +14,19 @@ A hit is keyed by rule, file and the normalised text of its line, not its line n
 moving around doesn't turn old hits into new ones. The baseline counts hits per key.
 ``check`` fails when a key appears more often than the baseline allows (a new violation), and,
 given the base branch's baseline, when the baseline itself grew (the ratchet only shrinks).
+
+``prompts`` holds every prompt a repo's tests send to a reviewed allowlist (#20): the string given
+to a ``prompt`` / ``user_prompt`` / ``negative_prompt`` / ``negative`` keyword, dict key or variable
+in a test file, and the same keys in ``*.jsonl`` under tests/ or eval/. A new prompt fails until it
+is added to ``.suite-prompts-allowlist.txt``, so it is reviewed as its own line in the diff.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -224,9 +232,144 @@ def fixtures(rules: list[Rule] | None = None) -> list[dict]:
     return out
 
 
+PROMPT_ALLOWLIST = ".suite-prompts-allowlist.txt"
+PROMPT_NAME = re.compile(r"(^|_)(prompts?|negative)$", re.IGNORECASE)
+_SKIP_DIRS = {".venv", "venv", "node_modules", "build", "dist", ".git", ".argus-ci", "__pycache__"}
+
+
+def _is_test(rel: Path) -> bool:
+    n = rel.name
+    return (any(p in ("tests", "test") for p in rel.parts[:-1]) or n.startswith("test_")
+            or n.endswith("_test.py") or n == "conftest.py")
+
+
+def _norm(s: str) -> str:
+    return " ".join(s.split())
+
+
+def _strings(node: ast.AST):
+    """String literals in *node*: a str constant, an f-string (each placeholder as ``{}``), or a
+    list/tuple/set of those."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        yield node.value
+    elif isinstance(node, ast.JoinedStr):
+        yield "".join(v.value if isinstance(v, ast.Constant) else "{}" for v in node.values)
+    elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        for e in node.elts:
+            yield from _strings(e)
+
+
+def _target_name(node: ast.AST | None) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return ""
+
+
+def prompts_in_py(text: str) -> list[str]:
+    """Prompts in Python source: values of prompt-named keywords, dict keys and assignments."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    out = []
+    for n in ast.walk(tree):
+        pairs: list[tuple[str, ast.AST]] = []
+        if isinstance(n, ast.keyword) and n.arg:
+            pairs.append((n.arg, n.value))
+        elif isinstance(n, ast.Dict):
+            pairs += [(_target_name(k), v) for k, v in zip(n.keys, n.values) if k is not None]
+        elif isinstance(n, ast.Assign):
+            pairs += [(_target_name(t), n.value) for t in n.targets]
+        elif isinstance(n, ast.AnnAssign) and n.value is not None:
+            pairs.append((_target_name(n.target), n.value))
+        for name, value in pairs:
+            if PROMPT_NAME.search(name):
+                out += [_norm(s) for s in _strings(value) if s.strip()]
+    return out
+
+
+def prompts_in_jsonl(text: str) -> list[str]:
+    """Prompts in JSON Lines: values of prompt-named keys. ``//`` comment lines are skipped."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("//"):
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            out += [_norm(v) for k, v in row.items() if PROMPT_NAME.search(k) and isinstance(v, str) and v.strip()]
+    return out
+
+
+def collect_prompts(root: Path, paths: list[str] | None = None) -> dict[str, list[str]]:
+    """Prompt -> files it appears in: test files and eval/test JSONL under *root*, plus every .py
+    and .jsonl under *paths* (relative to *root*), test or not."""
+    found: dict[str, list[str]] = {}
+    extra = [(root / p).resolve() for p in paths or []]
+    for f in sorted(root.rglob("*")):
+        rel = f.relative_to(root)
+        if not f.is_file() or _SKIP_DIRS.intersection(rel.parts) or f.suffix not in (".py", ".jsonl"):
+            continue
+        listed = any(f.resolve() == e or e in f.resolve().parents for e in extra)
+        if f.suffix == ".py" and (listed or _is_test(rel)):
+            got = prompts_in_py(f.read_text(encoding="utf-8", errors="replace"))
+        elif f.suffix == ".jsonl" and (listed or _is_test(rel) or "eval" in rel.parts[:-1]):
+            got = prompts_in_jsonl(f.read_text(encoding="utf-8", errors="replace"))
+        else:
+            continue
+        for s in got:
+            files = found.setdefault(s, [])
+            if rel.as_posix() not in files:
+                files.append(rel.as_posix())
+    return found
+
+
+def read_allowlist(path: Path) -> set[str]:
+    """One prompt per line; blank lines and lines starting with ``#`` are ignored."""
+    if not path.is_file():
+        return set()
+    return {_norm(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")}
+
+
+def write_allowlist(path: Path, prompts: list[str]) -> None:
+    head = ("# Every prompt this repo's tests send (argus-ci suite-rules `check.py prompts`, #20).\n"
+            "# Harmless markers only: no sexual, violent or illegal text. One prompt per line, whitespace\n"
+            "# collapsed; review each new line as you would the prompt itself.\n")
+    path.write_text(head + "".join(f"{p}\n" for p in sorted(set(prompts))), encoding="utf-8")
+
+
 def _print_hits(hits: list[Hit]) -> None:
     for h in hits:
         print(f"{h.path}:{h.line}: [{h.rule}] {h.detail}")
+
+
+def _prompts(root: Path, allowlist: str, write: bool, paths: list[str]) -> int:
+    found = collect_prompts(root, paths)
+    path = root / allowlist
+    if write:
+        write_allowlist(path, list(found))
+        print(f"wrote {len(found)} prompt(s) to {allowlist}")
+        return 0
+    allowed = read_allowlist(path)
+    new = {p: fs for p, fs in found.items() if p not in allowed}
+    for p, fs in sorted(new.items()):
+        print(f"{fs[0]}: prompt not in {allowlist}: {p!r}")
+    unused = allowed - found.keys()
+    if unused:
+        print(f"{len(unused)} allowlisted prompt(s) are no longer used: run `check.py prompts --write` to drop them.")
+    if new:
+        print(f"{len(new)} prompt(s) are not in {allowlist}. If each is a harmless marker, add it there "
+              "(one line each) so review sees it.")
+        return 1
+    print(f"ok: {len(found)} prompt(s), all allowlisted")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -241,10 +384,17 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["check"].add_argument("--baseline", default=BASELINE)
     sub.choices["check"].add_argument("--base-baseline", default="",
                                       help="The base branch's baseline: the baseline may not grow past it")
+    pr = sub.add_parser("prompts", help="Hold the prompts tests send to a reviewed allowlist")
+    pr.add_argument("--root", default=".")
+    pr.add_argument("--allowlist", default=PROMPT_ALLOWLIST)
+    pr.add_argument("--write", action="store_true", help="Write the allowlist from the prompts found (adoption)")
+    pr.add_argument("paths", nargs="*", help="Extra files or dirs to scan in full, test or not (e.g. demo/)")
     fx = sub.add_parser("fixtures")
     fx.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
 
+    if a.cmd == "prompts":
+        return _prompts(Path(a.root).resolve(), a.allowlist, a.write, a.paths)
     if a.cmd == "fixtures":
         res = fixtures()
         if a.json:

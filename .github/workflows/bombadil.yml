@@ -1,0 +1,203 @@
+name: Bombadil (reusable)
+
+# Property-based UI testing (Bombadil) against a static build of the calling repo's demo UI,
+# lifted from argus-studio's PR job (argus-studio#240/#241, argus-ci#12). It builds the UI,
+# serves the build on 127.0.0.1:4173, and lets Bombadil drive a browser around it at random
+# (clicks, typing, scrolling, back/reload) for `time-limit`, checking the caller's spec in
+# every state. On a violation it uploads the trace and writes the replay commands to the
+# job summary. Opt in from a repo's ci.yml:
+#
+#   bombadil:
+#     uses: smk762/argus-ci/.github/workflows/bombadil.yml@v1
+#     with:
+#       working-directory: web
+#
+# Only point it at a static or mock-backed build: random clicks press any delete, purge or
+# move button a live backend offers. The spec imports @antithesishq/bombadil, so the UI keeps
+# it as a devDependency at `bombadil-version`.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory holding the UI's package.json (e.g. web, frontend, .)."
+        type: string
+        default: "."
+      node-version:
+        description: "Node version for npm ci and the build (actions/setup-node)."
+        type: string
+        default: "22"
+      build-command:
+        description: "Builds the static UI into serve-dir; run in working-directory."
+        type: string
+        default: "npm run build:static"
+      serve-dir:
+        description: "The build output to serve, relative to working-directory."
+        type: string
+        default: "out"
+      specification:
+        description: "Bombadil spec, relative to working-directory."
+        type: string
+        default: "bombadil/spec.ts"
+      time-limit:
+        description: "How long Bombadil explores (e.g. 3m, 45m). Keep it well under timeout-minutes."
+        type: string
+        default: "3m"
+      bombadil-version:
+        description: "@antithesishq/bombadil version the action runs; match the UI's devDependency."
+        type: string
+        default: "0.7.10"
+      exit-on-violation:
+        description: "Stop at the first violated property (a PR gate) or keep exploring (a long run)."
+        type: boolean
+        default: true
+      continue-on-error:
+        description: "Report a violation without failing the caller, while the spec beds in."
+        type: boolean
+        default: false
+      timeout-minutes:
+        description: "Job timeout."
+        type: number
+        default: 20
+    outputs:
+      violations:
+        description: "Space-separated names of the violated properties; empty when none."
+        value: ${{ jobs.bombadil.outputs.violations }}
+
+permissions:
+  contents: read
+
+jobs:
+  bombadil:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    continue-on-error: ${{ inputs.continue-on-error }}
+    outputs:
+      violations: ${{ steps.violated.outputs.names }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - run: npm ci
+
+      - name: Build
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: eval "$BUILD_COMMAND"
+
+      - name: Paths
+        id: paths
+        env:
+          SERVE_DIR: ${{ inputs.serve-dir }}
+          SPECIFICATION: ${{ inputs.specification }}
+        run: |
+          serve="$(realpath -m "$SERVE_DIR")"
+          spec="$(realpath -m "$SPECIFICATION")"
+          [ -d "$serve" ] || { echo "::error::serve-dir $SERVE_DIR does not exist after the build"; exit 1; }
+          [ -f "$spec" ] || { echo "::error::specification $SPECIFICATION not found in ${PWD#"$GITHUB_WORKSPACE"/}"; exit 1; }
+          echo "serve=$serve" >> "$GITHUB_OUTPUT"
+          echo "spec=$spec" >> "$GITHUB_OUTPUT"
+
+      # Resolves routes the way a trailingSlash export and Cloudflare Pages do (argus-studio's
+      # scripts/static-server.mjs): `/x/` -> `x/index.html`, `/x` -> `x`, `x/index.html` or
+      # `x.html`. Anything else is a 404, so a missing asset shows up as one.
+      - name: Serve the build on :4173
+        env:
+          SERVE: ${{ steps.paths.outputs.serve }}
+        run: |
+          cat > "$RUNNER_TEMP/static-server.mjs" <<'JS'
+          import { createServer } from "node:http";
+          import { readFile, stat } from "node:fs/promises";
+          import path from "node:path";
+          const TYPES = {
+            ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript",
+            ".css": "text/css", ".json": "application/json", ".map": "application/json", ".txt": "text/plain",
+            ".xml": "application/xml", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
+            ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
+            ".wasm": "application/wasm", ".webmanifest": "application/manifest+json",
+          };
+          const root = path.resolve(process.argv[2]);
+          async function resolveFile(urlPath) {
+            let clean;
+            try { clean = decodeURIComponent(urlPath.split("?")[0]); } catch { return null; }
+            const file = path.join(root, clean);
+            if (file !== root && !file.startsWith(root + path.sep)) return null;
+            for (const candidate of [file, path.join(file, "index.html"), `${file}.html`]) {
+              try { if ((await stat(candidate)).isFile()) return candidate; } catch { /* next form */ }
+            }
+            return null;
+          }
+          createServer(async (req, res) => {
+            const file = await resolveFile(req.url ?? "/");
+            if (!file) { res.writeHead(404).end("not found"); return; }
+            res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" });
+            res.end(await readFile(file));
+          }).listen(4173, "127.0.0.1", () => console.log(`Serving ${root} at http://127.0.0.1:4173/`));
+          JS
+          node "$RUNNER_TEMP/static-server.mjs" "$SERVE" > "$RUNNER_TEMP/static-server.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4173/ > /dev/null && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/static-server.log"
+          exit 1
+
+      - name: Bombadil
+        id: bombadil
+        uses: antithesishq/bombadil-action@d4f3fa478dfd54605f544d2c0d5f0fcfdeeec893 # v3
+        with:
+          version: ${{ inputs.bombadil-version }}
+          origin: http://127.0.0.1:4173/
+          specification: ${{ steps.paths.outputs.spec }}
+          time-limit: ${{ inputs.time-limit }}
+          exit-on-violation: ${{ inputs.exit-on-violation }}
+          output-path: ${{ github.workspace }}/bombadil-output
+
+      - name: Violated properties
+        id: violated
+        if: failure() && steps.bombadil.outcome == 'failure'
+        run: |
+          trace="$GITHUB_WORKSPACE/bombadil-output/trace.jsonl"
+          names="$(jq -r '.violations[]?.name' "$trace" 2>/dev/null | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+          echo "Violated: ${names:-none found in the trace}"
+
+      - name: Upload the trace
+        if: failure() && steps.bombadil.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bombadil-output
+          path: ${{ github.workspace }}/bombadil-output
+          retention-days: 14
+
+      - name: How to replay it
+        if: failure() && steps.bombadil.outcome == 'failure'
+        env:
+          NAMES: ${{ steps.violated.outputs.names }}
+          WD: ${{ inputs.working-directory }}
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          SERVE_DIR: ${{ inputs.serve-dir }}
+          SPECIFICATION: ${{ inputs.specification }}
+        run: |
+          {
+            echo "## Bombadil found a property violation"
+            echo
+            echo "Violated: \`${NAMES:-see the Bombadil step log}\`. The actions before it are in the **Bombadil** step's log."
+            echo "To replay it, download the \`bombadil-output\` artifact into \`$WD/\` and, from there:"
+            echo
+            echo '```sh'
+            echo "$BUILD_COMMAND"
+            echo "python3 -m http.server 4173 -d $SERVE_DIR &   # or any static server on :4173"
+            echo 'npx bombadil browser inspect bombadil-output    # step through the trace'
+            echo "npx bombadil browser test http://127.0.0.1:4173/ $SPECIFICATION --headless --no-sandbox --reproduce bombadil-output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

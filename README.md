@@ -126,6 +126,48 @@ To regenerate the reference locally, run `uv run python -m typer argus_curator.c
 Secret: `denylist` (optional). It holds newline-separated private terms, matched case-insensitively. It is
 never committed. A secret is not passed to pull requests from forks, so the denylist is skipped there.
 
+## `bombadil.yml`
+
+Property-based UI testing with [Bombadil](https://github.com/antithesishq/bombadil) against a
+static build of a demo UI, lifted from argus-studio's PR job (argus-studio#240/#241). It builds the
+UI, serves the build on `127.0.0.1:4173` and lets Bombadil drive a browser around it at random
+(clicks, typing, scrolling, back/reload) for `time-limit`, checking the UI's spec in every state.
+On a violation it uploads the `bombadil-output` trace and writes the replay commands to the job
+summary.
+
+The build is served the way a `trailingSlash` export and Cloudflare Pages resolve routes: `/x/` →
+`x/index.html`, and `/x` → `x`, `x/index.html` or `x.html`. Anything else is a 404, so a missing
+asset fails `noHttpErrorCodes`.
+
+**Only point it at a static or mock-backed build.** Random clicks press any delete, purge or move
+button a live backend offers. The UI needs a backend-free build command, a spec, and
+`@antithesishq/bombadil` as a devDependency at `bombadil-version` (the spec imports it).
+
+```yaml
+jobs:
+  bombadil:
+    uses: smk762/argus-ci/.github/workflows/bombadil.yml@v1
+    with:
+      working-directory: web
+```
+
+| Input               | Default                | Notes                                                                           |
+| ------------------- | ---------------------- | ------------------------------------------------------------------------------- |
+| `working-directory` | `.`                    | Directory holding the UI's `package.json`.                                      |
+| `node-version`      | `22`                   | Node for `npm ci` and the build.                                                |
+| `build-command`     | `npm run build:static` | Builds the static UI into `serve-dir`.                                          |
+| `serve-dir`         | `out`                  | Build output, relative to `working-directory`.                                  |
+| `specification`     | `bombadil/spec.ts`     | Bombadil spec, relative to `working-directory`.                                 |
+| `time-limit`        | `3m`                   | How long Bombadil explores. Keep it well under `timeout-minutes`.               |
+| `bombadil-version`  | `0.7.10`               | Version the action runs; match the devDependency.                               |
+| `exit-on-violation` | `true`                 | Stop at the first violation (a PR gate); `false` keeps exploring (a long run).  |
+| `continue-on-error` | `false`                | Report a violation without failing the caller, while a new spec beds in.        |
+| `timeout-minutes`   | `20`                   | Job timeout.                                                                    |
+
+Output: `violations`, the space-separated names of the violated properties (empty when none).
+`bombadil-self-test.yml` runs it on `bombadil-fixture/`: the clean build must pass, and a build that
+logs a console error must report `noConsoleErrors`.
+
 ## `suite-rules.yml`
 
 Lint rules that each eliminate a class of mistake found across the suite (missing timeouts,

@@ -161,9 +161,15 @@ the file shrinks.
 | `rules-ref` | `v1` | argus-ci ref the catalogue is read from. Keep it in step with the `@ref` you call. |
 | `paths` | `.` | Space-separated paths to scan. |
 
-Tool versions are pinned in the catalogue (`[tools]`). `silent-except` is a *convention* rule: a
-deliberate swallow must say so (`contextlib.suppress(...)` with a comment), so the real silent
-failures stand out.
+Tool versions are pinned in the catalogue (`[tools]`). *Convention* rules enforce a code shape; the
+auditor doesn't count their hits as findings:
+
+- `silent-except`: a deliberate swallow must say so (`contextlib.suppress(...)` with a comment), so
+  the real silent failures stand out.
+- `sibling-checkout-read`: no path into a sibling repo's checkout (`../argus-x`, `/home/<user>/argus-x`,
+  `.parent / "argus-x"`). Repos talk over HTTP or a versioned schema (SUITE.md's shared rules).
+- `cortex-copy`: no local copy of a helper cortex ships (`safe_join`, `safe_name`, `env_flag`,
+  `WriteGuard`, `DEFAULT_EXPOSED_LABELS`). Import it from `argus_cortex`.
 
 ## Why release/publish is **not** here
 

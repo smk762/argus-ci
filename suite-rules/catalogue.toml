@@ -96,3 +96,23 @@ tool = "semgrep"
 # nosemgrep. The ones that grow with use (jobs, uploads, generated items) are the real cost.
 severity = "LOW"
 message = "A route handler lists or walks a directory on every request, so its cost grows with the data and concurrent requests queue behind it. Keep an index updated on write (or cached by mtime) and look items up by key."
+
+[[rules]]
+id = "sibling-checkout-read"
+class = "unhandled_error"
+# SUITE.md shared rule: repos talk over HTTP or a versioned schema, never by reading another repo's
+# files. A convention: no hits across the suite at adoption; it keeps the boundary from eroding.
+kind = "convention"
+tool = "semgrep"
+severity = "MEDIUM"
+message = "This path reaches into a sibling repo's checkout. Call its service, or depend on the package it publishes."
+
+[[rules]]
+id = "cortex-copy"
+class = "fail_open"
+# SUITE.md shared rule: shared code lives in cortex, import it, don't copy it. A local copy of a
+# guard (safe_join, WriteGuard, the moderation labels) misses cortex's fixes and fails open.
+kind = "convention"
+tool = "semgrep"
+severity = "LOW"
+message = "This redefines a helper argus-cortex ships (safe_join, safe_name, env_flag, WriteGuard, DEFAULT_EXPOSED_LABELS). Import it from argus_cortex instead."

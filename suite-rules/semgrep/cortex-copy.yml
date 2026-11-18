@@ -1,0 +1,39 @@
+rules:
+  - id: cortex-copy
+    languages: [python]
+    severity: WARNING
+    message: >-
+      This redefines a helper that argus-cortex already ships. Shared code lives in cortex: import it
+      (argus_cortex.fs.safe_join / safe_name, argus_cortex.server.env_flag / WriteGuard,
+      argus_cortex.moderation.nudenet.DEFAULT_EXPOSED_LABELS) so fixes reach every repo. The paved-road codemods
+      (ai-code-auditor#56) rewrite the common cases.
+    metadata:
+      class: fail_open
+      catalogue: argus-ci/suite-rules
+    paths:
+      exclude:
+        - "argus_cortex/"
+        - "tests/"
+        - "test_*.py"
+        - "*_test.py"
+        - "conftest.py"
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: |
+                  def $F(...):
+                    ...
+              - pattern: |
+                  async def $F(...):
+                    ...
+          - metavariable-regex:
+              metavariable: $F
+              regex: ^(safe_join|safe_name|env_flag)$
+      - pattern: |
+          class WriteGuard:
+            ...
+      - pattern: |
+          class WriteGuard(...):
+            ...
+      - pattern: DEFAULT_EXPOSED_LABELS = ...
+      - pattern: 'DEFAULT_EXPOSED_LABELS: $T = ...'

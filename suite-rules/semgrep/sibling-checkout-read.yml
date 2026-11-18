@@ -1,0 +1,34 @@
+rules:
+  - id: sibling-checkout-read
+    languages: [python]
+    severity: WARNING
+    message: >-
+      This path reaches into a sibling repo's checkout. Repos talk over HTTP or a versioned schema, never by reading
+      another repo's files: the sibling may not be checked out, may sit at another commit, or may not exist in a
+      deployed image. Call its service, or depend on the package it publishes.
+    metadata:
+      class: unhandled_error
+      catalogue: argus-ci/suite-rules
+    paths:
+      exclude:
+        - "tests/"
+        - "test_*.py"
+        - "*_test.py"
+        - "conftest.py"
+    pattern-either:
+      # ../argus-x, /home/<user>/argus-x, ~/argus-x inside a string literal (also f-strings).
+      - pattern: '"=~/(^|[\\/])\.\.[\\/]+argus[-_][a-z]/"'
+      - pattern: '"=~/(^|[\\/])(home|Users)[\\/][^\\/]+[\\/]argus[-_][a-z]/"'
+      - pattern: '"=~/^~[\\/]argus[-_][a-z]/"'
+      # Path(...) / ".." / "argus-x", and .parent / .parents[n] joined with a repo name. Repo dirs are
+      # dashed (argus-mint); this checkout's own package dirs are underscored (argus_mint), so they don't match.
+      # semgrep flattens a / b / c, so a join followed by more segments needs its own pattern.
+      - pattern: $P / ".." / "=~/^argus[-_][a-z]/"
+      - pattern: $P / ".." / "=~/^argus[-_][a-z]/" / $A
+      - pattern: $P / ".." / "=~/^argus[-_][a-z]/" / $A / $B
+      - pattern: $P.parent / "=~/^argus-[a-z]/"
+      - pattern: $P.parent / "=~/^argus-[a-z]/" / $A
+      - pattern: $P.parent / "=~/^argus-[a-z]/" / $A / $B
+      - pattern: $P.parents[$N] / "=~/^argus-[a-z]/"
+      - pattern: $P.parents[$N] / "=~/^argus-[a-z]/" / $A
+      - pattern: $P.parents[$N] / "=~/^argus-[a-z]/" / $A / $B

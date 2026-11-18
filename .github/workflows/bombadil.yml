@@ -191,7 +191,7 @@ jobs:
           {
             echo "## Bombadil found a property violation"
             echo
-            echo "Violated: \`${NAMES:-see the Bombadil step's log}\`. The actions before it are in the **Bombadil** step's log."
+            echo "Violated: \`${NAMES:-see the Bombadil step log}\`. The actions before it are in the **Bombadil** step's log."
             echo "To replay it, download the \`bombadil-output\` artifact into \`$WD/\` and, from there:"
             echo
             echo '```sh'

@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   clean:
+    name: clean build must pass
     uses: ./.github/workflows/bombadil.yml
     with:
       working-directory: bombadil-fixture
@@ -25,6 +26,9 @@ jobs:
       timeout-minutes: 10
 
   broken:
+    # This job FAILS on purpose (a red X in the checks list): the fixture logs a console error and
+    # Bombadil must catch it. broken-is-caught is the verdict; the run succeeds when it passes.
+    name: broken build must fail (expected)
     uses: ./.github/workflows/bombadil.yml
     with:
       working-directory: bombadil-fixture
@@ -34,6 +38,7 @@ jobs:
       continue-on-error: true
 
   broken-is-caught:
+    name: broken build was caught (noConsoleErrors)
     needs: broken
     if: always()
     runs-on: ubuntu-latest
@@ -44,6 +49,8 @@ jobs:
         run: |
           echo "violations: ${VIOLATIONS:-none}"
           case " $VIOLATIONS " in
-            *" noConsoleErrors "*) echo "caught" ;;
+            *" noConsoleErrors "*)
+              echo "caught"
+              echo "The **broken build must fail (expected)** job failing is the point: Bombadil caught the fixture's deliberate console error (\`noConsoleErrors\`)." >> "$GITHUB_STEP_SUMMARY" ;;
             *) echo "::error::bombadil.yml did not report noConsoleErrors on the broken fixture"; exit 1 ;;
           esac

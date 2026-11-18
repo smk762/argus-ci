@@ -1,0 +1,12 @@
+{
+  "name": "bombadil-fixture",
+  "private": true,
+  "description": "A two-page static site for bombadil-self-test.yml: build:ok must pass, build:broken must be caught.",
+  "scripts": {
+    "build:ok": "node build.mjs",
+    "build:broken": "node build.mjs --broken"
+  },
+  "devDependencies": {
+    "@antithesishq/bombadil": "0.7.10"
+  }
+}

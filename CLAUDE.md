@@ -45,7 +45,8 @@ Each row names what enforces it. An **UNENFORCED** row is a known gap: when one 
 - `.github/workflows/suite-check.yml`: the reusable suite-map check.
 - `.github/workflows/docs-check.yml`: the reusable docs check (CLI reference drift, published-docs hygiene).
 - `.github/workflows/suite-rules.yml`: the reusable suite-rules check.
-- `suite.yml`, `suite-rules-self-test.yml` and `self-check.yml` are this repo's own CI.
+- `.github/workflows/bombadil.yml`: the reusable Bombadil UI check (static build, served locally). `bombadil-fixture/` + `bombadil-self-test.yml` prove it.
+- `suite.yml`, `suite-rules-self-test.yml`, `bombadil-self-test.yml` and `self-check.yml` are this repo's own CI.
 - `suite-rules/`: the catalogue (`catalogue.toml`), semgrep rules, fixtures, and `check.py`.
 - `scripts/check_workflows.py`: the hygiene and input-compatibility check.
 

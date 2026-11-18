@@ -36,6 +36,9 @@ def _call(doc: object) -> dict | None:
     on = doc.get("on", doc.get(True))  # YAML 1.1 reads a bare `on` key as True
     if isinstance(on, dict) and "workflow_call" in on:
         return on["workflow_call"] or {}
+    # Shorthand forms: `on: workflow_call` and `on: [workflow_call, push]` (no inputs or secrets).
+    if on == "workflow_call" or (isinstance(on, list) and "workflow_call" in on):
+        return {}
     return None
 
 

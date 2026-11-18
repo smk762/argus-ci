@@ -7,10 +7,9 @@ rules:
       taint_assume_safe_indexes: true
     languages: [python]
     severity: ERROR
-    message: >-
-      Request input reaches a filesystem path. Use argus_cortex.fs.safe_join(root, value), or safe_name for a single id, which returns the resolved path under root or raises PathRefused.
+    message: "Request input reaches a filesystem path. Use argus_cortex.fs.safe_join(root, value), or safe_name for a single id, which returns the resolved path under root or raises PathRefused."
     metadata:
-      class: path_traversal
+      class: "path_traversal"
       catalogue: argus-ci/suite-rules
     paths:
       exclude:
@@ -164,8 +163,13 @@ rules:
           - pattern: request.files
           - pattern: request.query_params
           - pattern: request.path_params
+          - pattern: request.headers
+          - pattern: request.cookies
+          - pattern: request.url
           - pattern: await request.json()
           - pattern: await request.form()
+          - pattern: await request.body()
+          - pattern: request.stream()
           - pattern: request.get_json(...)
     pattern-sanitizers:
       - pattern: int(...)

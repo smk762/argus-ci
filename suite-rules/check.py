@@ -13,7 +13,9 @@ Standard library only (Python 3.11+). ruff and semgrep come from $RUFF and $SEMG
 A hit is keyed by rule, file and the normalised text of its line, not its line number, so code
 moving around doesn't turn old hits into new ones. The baseline counts hits per key.
 ``check`` fails when a key appears more often than the baseline allows (a new violation), and,
-given the base branch's baseline, when the baseline itself grew (the ratchet only shrinks).
+given the base branch's baseline, when the baseline itself grew (the ratchet only shrinks). The
+ratchet compares each rule's total, not each key, so renaming a file or editing a line that holds a
+baselined hit (a new key, same count) passes once the baseline is regenerated.
 
 ``prompts`` holds every prompt a repo's tests send to a reviewed allowlist (#20): the string given
 to a ``prompt`` / ``user_prompt`` / ``negative_prompt`` / ``negative`` keyword, dict key or variable
@@ -181,9 +183,17 @@ def write_baseline(path: Path, hits: list[Hit], tools: dict[str, str]) -> int:
     return sum(c.values())
 
 
+def _per_rule(c: Counter[str]) -> Counter[str]:
+    out: Counter[str] = Counter()
+    for key, n in c.items():
+        out[key.split("|", 1)[0]] += n
+    return out
+
+
 def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None = None) -> dict:
-    """New hits beyond the baseline, entries now fixed, and (given the base branch's baseline)
-    entries the baseline gained."""
+    """New hits beyond the baseline, entries now fixed, and (given the base branch's baseline) the
+    rules whose baselined total grew. Totals per rule, not per key: a renamed file or an edited line
+    moves a hit to a new key without adding one."""
     cur = counts(hits)
     new = []
     seen: Counter[str] = Counter()
@@ -192,7 +202,10 @@ def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None =
         if seen[h.key] > baseline.get(h.key, 0):
             new.append(h)
     fixed = sum(max(0, n - cur.get(k, 0)) for k, n in baseline.items())
-    grew = sorted(k for k, n in baseline.items() if n > (base or Counter()).get(k, 0)) if base is not None else []
+    grew = []
+    if base is not None:
+        mine, theirs = _per_rule(baseline), _per_rule(base)
+        grew = sorted(r for r, n in mine.items() if n > theirs.get(r, 0))
     return {"new": new, "fixed": fixed, "grew": grew}
 
 
@@ -308,15 +321,23 @@ def prompts_in_jsonl(text: str) -> list[str]:
     return out
 
 
+def _walk(root: Path) -> list[Path]:
+    """The .py and .jsonl files under *root*, never descending into _SKIP_DIRS (node_modules alone
+    can hold hundreds of thousands of files)."""
+    out = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if x not in _SKIP_DIRS]
+        out += [Path(d, f) for f in files if f.endswith((".py", ".jsonl"))]
+    return sorted(out)
+
+
 def collect_prompts(root: Path, paths: list[str] | None = None) -> dict[str, list[str]]:
     """Prompt -> files it appears in: test files and eval/test JSONL under *root*, plus every .py
     and .jsonl under *paths* (relative to *root*), test or not."""
     found: dict[str, list[str]] = {}
     extra = [(root / p).resolve() for p in paths or []]
-    for f in sorted(root.rglob("*")):
+    for f in _walk(root):
         rel = f.relative_to(root)
-        if not f.is_file() or _SKIP_DIRS.intersection(rel.parts) or f.suffix not in (".py", ".jsonl"):
-            continue
         listed = any(f.resolve() == e or e in f.resolve().parents for e in extra)
         if f.suffix == ".py" and (listed or _is_test(rel)):
             got = prompts_in_py(f.read_text(encoding="utf-8", errors="replace"))
@@ -332,17 +353,23 @@ def collect_prompts(root: Path, paths: list[str] | None = None) -> dict[str, lis
 
 
 def read_allowlist(path: Path) -> set[str]:
-    """One prompt per line; blank lines and lines starting with ``#`` are ignored."""
+    """One prompt per line; blank lines and lines starting with ``#`` are ignored. A prompt that
+    itself starts with ``#`` or ``\\`` is written with a leading ``\\``, which is dropped here."""
     if not path.is_file():
         return set()
-    return {_norm(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")}
+    return {_norm(ln[1:] if ln.startswith("\\") else ln) for ln in path.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("#")}
+
+
+def _escape(prompt: str) -> str:
+    return "\\" + prompt if prompt.startswith(("#", "\\")) else prompt
 
 
 def write_allowlist(path: Path, prompts: list[str]) -> None:
     head = ("# Every prompt this repo's tests send (argus-ci suite-rules `check.py prompts`, #20).\n"
             "# Harmless markers only: no sexual, violent or illegal text. One prompt per line, whitespace\n"
             "# collapsed; review each new line as you would the prompt itself.\n")
-    path.write_text(head + "".join(f"{p}\n" for p in sorted(set(prompts))), encoding="utf-8")
+    path.write_text(head + "".join(f"{_escape(p)}\n" for p in sorted(set(prompts))), encoding="utf-8")
 
 
 def _print_hits(hits: list[Hit]) -> None:
@@ -433,7 +460,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {h.path}:{h.line}: [{h.rule}] {r.message}")
         print("Fix them, or mark a line with a reasoned `# noqa: <code>` / `# nosemgrep: <id>`.")
     if rep["grew"]:
-        print(f"The baseline grew by {len(rep['grew'])} entr(ies) compared with the base branch; it may only shrink.")
+        print(f"The baseline grew for {len(rep['grew'])} rule(s) compared with the base branch "
+              f"({', '.join(rep['grew'])}); it may only shrink.")
     if rep["fixed"]:
         print(f"{rep['fixed']} baselined hit(s) are fixed: run `check.py baseline` to shrink the baseline.")
     if not rep["new"] and not rep["grew"]:

@@ -44,7 +44,7 @@ jobs:
 | `test-extras`     | `dev`                | Extras installed before pytest, e.g. `dev,server,cli`.       |
 | `ruff-version`    | `""`                 | Pin ruff via `uvx` (e.g. `0.15.16`); empty = latest.         |
 | `lint-paths`      | `src/ tests/`        | Paths passed to `ruff check` / `ruff format --check`.        |
-| `post-test`       | `""`                 | Extra command run in the test env after pytest.              |
+| `post-test`       | `""`                 | Extra command run in the test env after pytest. Its `GITHUB_TOKEN` is read-only. |
 
 ## `suite-check.yml`
 
@@ -77,7 +77,7 @@ import) correct and clean at every commit. It runs two jobs:
 - **`cli-reference`** regenerates the Typer CLI reference with
   `python -m typer <cli-module> utils docs --name <cli-name> --output <cli-output>`. It fails if the
   committed file differs or is missing. It is skipped when `cli-module` is empty, for a package with no CLI.
-  It installs the package from the repo's `uv.lock` (`uv sync --locked`) when there is one, so the reference
+  It installs the package from the repo's `uv.lock` (`uv sync --frozen`, extras only) when there is one, so the reference
   is rendered by the locked Typer, the same one that generated the committed file. Without a lock it falls
   back to `uv pip install -e .`, which takes the newest Typer.
 - **`hygiene`** fails on:
@@ -161,7 +161,7 @@ jobs:
 | `time-limit`        | `3m`                   | How long Bombadil explores. Keep it well under `timeout-minutes`.               |
 | `bombadil-version`  | `0.7.10`               | Version the action runs; match the devDependency.                               |
 | `exit-on-violation` | `true`                 | Stop at the first violation (a PR gate); `false` keeps exploring (a long run).  |
-| `continue-on-error` | `false`                | Report a violation without failing the caller, while a new spec beds in.        |
+| `continue-on-error` | `false`                | Report a violation (summary, trace, `violations` output) with the job still green, while a new spec beds in. |
 | `timeout-minutes`   | `20`                   | Job timeout.                                                                    |
 
 Output: `violations`, the space-separated names of the violated properties (empty when none).
@@ -179,7 +179,7 @@ ai-code-auditor scans with the same catalogue, so its findings and CI agree.
 
 It's opt-in. Existing violations are recorded in the repo's `.suite-rules-baseline.json`: CI fails
 on **new** violations only, and on a pull request the baseline may only shrink compared with the base
-branch.
+branch: no rule's total may grow, so a renamed file or an edited line only needs the baseline regenerated.
 
 ```yaml
 jobs:

@@ -52,7 +52,7 @@ on:
         type: boolean
         default: true
       continue-on-error:
-        description: "Report a violation without failing the caller, while the spec beds in."
+        description: "Report a violation (summary, trace, `violations` output) without failing the job, while the spec beds in."
         type: boolean
         default: false
       timeout-minutes:
@@ -71,16 +71,15 @@ jobs:
   bombadil:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    continue-on-error: ${{ inputs.continue-on-error }}
     outputs:
       violations: ${{ steps.violated.outputs.names }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
           cache: npm
@@ -151,8 +150,11 @@ jobs:
           cat "$RUNNER_TEMP/static-server.log"
           exit 1
 
+      # continue-on-error on the step, not the job: a job-level one still marks the check run as
+      # failed (a red X a required check blocks on). The steps below gate on the step's outcome.
       - name: Bombadil
         id: bombadil
+        continue-on-error: ${{ inputs.continue-on-error }}
         uses: antithesishq/bombadil-action@d4f3fa478dfd54605f544d2c0d5f0fcfdeeec893 # v3
         with:
           version: ${{ inputs.bombadil-version }}
@@ -164,23 +166,25 @@ jobs:
 
       - name: Violated properties
         id: violated
-        if: failure() && steps.bombadil.outcome == 'failure'
+        if: ${{ !cancelled() && steps.bombadil.outcome == 'failure' }}
         run: |
+          # The replay serves the build with the same resolver CI used, so the trace reproduces.
+          cp "$RUNNER_TEMP/static-server.mjs" "$GITHUB_WORKSPACE/bombadil-output/" || true
           trace="$GITHUB_WORKSPACE/bombadil-output/trace.jsonl"
           names="$(jq -r '.violations[]?.name' "$trace" 2>/dev/null | sort -u | tr '\n' ' ' | sed 's/ *$//')"
           echo "names=$names" >> "$GITHUB_OUTPUT"
           echo "Violated: ${names:-none found in the trace}"
 
       - name: Upload the trace
-        if: failure() && steps.bombadil.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.bombadil.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
         with:
           name: bombadil-output
           path: ${{ github.workspace }}/bombadil-output
           retention-days: 14
 
       - name: How to replay it
-        if: failure() && steps.bombadil.outcome == 'failure'
+        if: ${{ !cancelled() && steps.bombadil.outcome == 'failure' }}
         env:
           NAMES: ${{ steps.violated.outputs.names }}
           WD: ${{ inputs.working-directory }}
@@ -196,7 +200,7 @@ jobs:
             echo
             echo '```sh'
             echo "$BUILD_COMMAND"
-            echo "python3 -m http.server 4173 -d $SERVE_DIR &   # or any static server on :4173"
+            echo "node bombadil-output/static-server.mjs $SERVE_DIR &   # the resolver CI served it with"
             echo 'npx bombadil browser inspect bombadil-output    # step through the trace'
             echo "npx bombadil browser test http://127.0.0.1:4173/ $SPECIFICATION --headless --no-sandbox --reproduce bombadil-output"
             echo '```'

@@ -34,9 +34,14 @@ class Baseline(unittest.TestCase):
     def test_ratchet_rejects_a_growing_baseline(self):
         mine = Counter({hit().key: 2, hit(text="z").key: 1})
         base = Counter({hit().key: 2})
-        self.assertEqual(check.compare([], mine, base)["grew"], [hit(text="z").key])
+        self.assertEqual(check.compare([], mine, base)["grew"], [hit().rule])
         self.assertEqual(check.compare([], Counter({hit().key: 1}), base)["grew"], [])  # shrinking is fine
         self.assertEqual(check.compare([], mine, None)["grew"], [])  # no base: first adoption
+
+    def test_ratchet_allows_a_hit_to_move_to_a_new_key(self):
+        base = Counter({hit(path="app/api.py").key: 1})
+        mine = Counter({hit(path="app/routes.py").key: 1})  # renamed file, same hit
+        self.assertEqual(check.compare([hit(path="app/routes.py")], mine, base)["grew"], [])
 
     def test_baseline_round_trip(self):
         with tempfile.TemporaryDirectory() as d:
@@ -92,6 +97,16 @@ class Prompts(unittest.TestCase):
                 self.assertEqual(check.main(["prompts", "--root", d]), 1)
             self.assertIn("'a dog'", out.getvalue())
             self.assertEqual(check.read_allowlist(root / check.PROMPT_ALLOWLIST), {"a cat"})
+
+    def test_a_prompt_starting_with_a_hash_round_trips(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_a.py").write_text('run(prompt="# Summarise this")\nrun(prompt="\\\\x")')
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(check.main(["prompts", "--root", d, "--write"]), 0)
+                self.assertEqual(check.main(["prompts", "--root", d]), 0)
+            self.assertEqual(check.read_allowlist(root / check.PROMPT_ALLOWLIST), {"# Summarise this", "\\x"})
 
 
 class Catalogue(unittest.TestCase):

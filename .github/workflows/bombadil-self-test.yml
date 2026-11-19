@@ -26,9 +26,9 @@ jobs:
       timeout-minutes: 10
 
   broken:
-    # This job FAILS on purpose (a red X in the checks list): the fixture logs a console error and
-    # Bombadil must catch it. broken-is-caught is the verdict; the run succeeds when it passes.
-    name: broken build must fail (expected)
+    # The fixture logs a console error and Bombadil must catch it. continue-on-error keeps this job
+    # green and reports the violation through `violations`; broken-is-caught is the verdict.
+    name: broken build reports a violation
     uses: ./.github/workflows/bombadil.yml
     with:
       working-directory: bombadil-fixture
@@ -51,6 +51,6 @@ jobs:
           case " $VIOLATIONS " in
             *" noConsoleErrors "*)
               echo "caught"
-              echo "The **broken build must fail (expected)** job failing is the point: Bombadil caught the fixture's deliberate console error (\`noConsoleErrors\`)." >> "$GITHUB_STEP_SUMMARY" ;;
+              echo "Bombadil caught the fixture's deliberate console error (\`noConsoleErrors\`)." >> "$GITHUB_STEP_SUMMARY" ;;
             *) echo "::error::bombadil.yml did not report noConsoleErrors on the broken fixture"; exit 1 ;;
           esac

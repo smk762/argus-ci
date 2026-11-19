@@ -28,7 +28,7 @@ on:
         type: string
         default: "src/ tests/"
       post-test:
-        description: "Optional command run after pytest in the test env (e.g. a schema check)."
+        description: "Optional command run after pytest in the test env (e.g. a schema check). Its GITHUB_TOKEN is read-only."
         type: string
         default: ""
 

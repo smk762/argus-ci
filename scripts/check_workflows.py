@@ -8,7 +8,8 @@ every caller of a reusable workflow) and no `pull_request_target` trigger.
 Compatibility: compares each `on: workflow_call` workflow in the working tree with the same file at BASE (default
 `v1`) and fails on a change that breaks a caller:
 
-  * a workflow, input or secret removed (or renamed, which is the same thing to a caller);
+  * a workflow, input, secret or output removed (or renamed, which is the same thing to a caller:
+    a missing output reads as an empty string, with no error);
   * an input's type changed;
   * an input or secret that becomes required, or a new one that is required without a default.
 
@@ -53,6 +54,8 @@ def _required(spec: dict) -> bool:
 
 def compare(name: str, old: dict, new: dict) -> tuple[list[str], list[str]]:
     errors, warnings = [], []
+    for key in (old.get("outputs") or {}).keys() - (new.get("outputs") or {}).keys():
+        errors.append(f"{name}: output `{key}` was removed or renamed")
     for kind in ("inputs", "secrets"):
         o, n = old.get(kind) or {}, new.get(kind) or {}
         for key, spec in o.items():

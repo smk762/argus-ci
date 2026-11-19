@@ -26,6 +26,11 @@ class Compat(unittest.TestCase):
         self.assertTrue(errs({"inputs": {"a": OLD["inputs"]["a"]}, "secrets": OLD["secrets"]}))
         self.assertTrue(errs({"inputs": OLD["inputs"]}))
 
+    def test_removed_output_fails(self):
+        out = {"violations": {"value": "${{ jobs.j.outputs.v }}"}}
+        self.assertEqual(compare("w.yml", {**OLD, "outputs": out}, {**OLD, "outputs": out})[0], [])
+        self.assertTrue(compare("w.yml", {**OLD, "outputs": out}, OLD)[0])
+
     def test_type_change_fails(self):
         self.assertTrue(errs({**OLD, "inputs": {**OLD["inputs"], "b": {"type": "string", "default": ""}}}))
 

@@ -37,7 +37,7 @@ Each row names what enforces it. An **UNENFORCED** row is a known gap: when one 
 | Release or publish (PyPI OIDC) inside a reusable workflow | PyPI refuses it (its `job_workflow_ref` check). Each repo keeps a top-level `release.yml` from argus-pkg-template |
 | A secret-derived value echoed without `::add-mask::` first | **UNENFORCED** |
 | A docs-check hygiene regex widened without running it over the siblings' docs first | **UNENFORCED** (it is a fleet gate: one bad pattern fails every consumer) |
-| A third-party action not pinned to a major tag | **UNENFORCED** |
+| A third-party action not pinned to a major tag (or to a full commit SHA with a `# vN` comment), or pinned to an older major than the same action elsewhere here | **UNENFORCED** |
 
 ## Layout
 

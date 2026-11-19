@@ -29,15 +29,15 @@ jobs:
   suite-rules:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the base branch's baseline, for the ratchet
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: smk762/argus-ci
           ref: ${{ inputs.rules-ref }}
           path: .argus-ci
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: Tool pins from the catalogue
         run: |
           python3 - <<'PY' >> "$GITHUB_ENV"
@@ -48,11 +48,13 @@ jobs:
           PY
       - name: The base branch's baseline
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          if git show "origin/${{ github.base_ref }}:.suite-rules-baseline.json" > "$RUNNER_TEMP/base-baseline.json" 2>/dev/null; then
+          if git show "origin/$BASE_REF:.suite-rules-baseline.json" > "$RUNNER_TEMP/base-baseline.json" 2>/dev/null; then
             echo "BASE_BASELINE=$RUNNER_TEMP/base-baseline.json" >> "$GITHUB_ENV"
           else
-            echo "No baseline on ${{ github.base_ref }} yet: first adoption, no ratchet check."
+            echo "No baseline on $BASE_REF yet: first adoption, no ratchet check."
           fi
       - name: Check
         env:

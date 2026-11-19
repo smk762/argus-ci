@@ -62,7 +62,9 @@ jobs:
         run: |
           set -eu
           if [ -f uv.lock ]; then
-            set -- --locked --python "$PY"
+            # --frozen, not --locked: install exactly the lock, without failing on a lock that lags
+            # pyproject.toml. --no-default-groups: the extras only, as the unlocked install does.
+            set -- --frozen --no-default-groups --python "$PY"
             for extra in $(printf '%s' "$EXTRAS" | tr ',' ' '); do set -- "$@" --extra "$extra"; done
             uv sync "$@"
           else

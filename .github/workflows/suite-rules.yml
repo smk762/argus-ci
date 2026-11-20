@@ -1,0 +1,72 @@
+name: Suite rules (reusable)
+
+# Runs the suite rule catalogue (suite-rules/) against the calling repo. New violations fail;
+# existing ones live in the repo's .suite-rules-baseline.json, which may only shrink.
+# Opt in from a repo's ci.yml:
+#
+#   suite-rules:
+#     uses: smk762/argus-ci/.github/workflows/suite-rules.yml@v1
+#
+# First adoption: run `python suite-rules/check.py baseline --root <repo>` from an argus-ci
+# checkout and commit the .suite-rules-baseline.json it writes.
+
+on:
+  workflow_call:
+    inputs:
+      rules-ref:
+        description: "argus-ci ref the catalogue is read from (keep it in step with the @ref you call)."
+        type: string
+        default: "v1"
+      paths:
+        description: "Space-separated paths to scan (default: the whole repo)."
+        type: string
+        default: "."
+
+permissions:
+  contents: read
+
+jobs:
+  suite-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the base branch's baseline, for the ratchet
+      - uses: actions/checkout@v7
+        with:
+          repository: smk762/argus-ci
+          ref: ${{ inputs.rules-ref }}
+          path: .argus-ci
+      - uses: astral-sh/setup-uv@v7
+      - name: Tool pins from the catalogue
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import tomllib
+          t = tomllib.load(open(".argus-ci/suite-rules/catalogue.toml", "rb"))["tools"]
+          print(f"RUFF=uvx ruff@{t['ruff']}")
+          print(f"SEMGREP=uvx --from semgrep=={t['semgrep']} semgrep")
+          PY
+      - name: The base branch's baseline
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git show "origin/$BASE_REF:.suite-rules-baseline.json" > "$RUNNER_TEMP/base-baseline.json" 2>/dev/null; then
+            echo "BASE_BASELINE=$RUNNER_TEMP/base-baseline.json" >> "$GITHUB_ENV"
+          else
+            echo "No baseline on $BASE_REF yet: first adoption, no ratchet check."
+          fi
+      - name: Check
+        env:
+          PATHS: ${{ inputs.paths }}
+        run: |
+          # shellcheck disable=SC2086 # PATHS is a space-separated list on purpose
+          python3 .argus-ci/suite-rules/check.py check --root . ${BASE_BASELINE:+--base-baseline "$BASE_BASELINE"} $PATHS
+      - name: Test prompts
+        # Opt-in: runs once the repo commits .suite-prompts-allowlist.txt (check.py prompts --write).
+        run: |
+          if [ -f .suite-prompts-allowlist.txt ]; then
+            python3 .argus-ci/suite-rules/check.py prompts --root .
+          else
+            echo "No .suite-prompts-allowlist.txt: test prompts are not checked."
+          fi

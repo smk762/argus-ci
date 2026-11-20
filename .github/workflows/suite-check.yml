@@ -41,6 +41,10 @@ jobs:
             echo "::error file=CLAUDE.md::CLAUDE.md lacks the argus-suite block. Copy it from the end of argus-cortex's SUITE.md."
             fail=1
           fi
+          # A warning for now: most consumers still have the old link, and an error would fail them all at once.
+          if grep -q 'argus-cortex/blob/main/SUITE.md' CLAUDE.md 2>/dev/null; then
+            echo "::warning file=CLAUDE.md::The \"Not checked out?\" link points at blob/main. The suite map lives on dev: https://github.com/smk762/argus-cortex/blob/dev/SUITE.md"
+          fi
           # Cortex checks its own working copy, so a PR that edits the map is checked against itself.
           map="$RUNNER_TEMP/SUITE.md"
           if [ "$NAME" = "argus-cortex" ] && [ -f SUITE.md ]; then cp SUITE.md "$map"

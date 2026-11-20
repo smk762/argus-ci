@@ -1,0 +1,118 @@
+# Suite rule catalogue (ai-code-auditor #55).
+#
+# Each rule eliminates one finding class (ai-code-auditor config/finding_classes.yaml) and has a
+# positive and a negative fixture under fixtures/<id>/. `python suite-rules/check.py fixtures`
+# proves every rule fires on its positive fixture and stays silent on its negative one, here in
+# argus-ci's own CI and in ai-code-auditor's rules.fixtures gate.
+#
+# A repo opts in through the suite-rules.yml reusable workflow. Existing violations live in the
+# repo's .suite-rules-baseline.json: CI fails on new ones only, and the baseline may only shrink.
+# To silence one hit for a reason, use `# noqa: <code>` (ruff) or `# nosemgrep: <id>` (semgrep)
+# on that line, with the reason in the comment.
+#
+# kind = "guard" (default) eliminates the class; kind = "convention" enforces a code shape that
+# keeps the class visible, and its hits are not counted as findings of the class.
+
+version = 1
+
+[tools]
+ruff = "0.15.16"
+semgrep = "1.180.0"
+
+[[rules]]
+id = "missing-timeout"
+class = "missing_timeout"
+tool = "ruff"
+codes = ["S113"]
+severity = "MEDIUM"
+message = "An HTTP call without a timeout can hang its worker forever. Pass timeout=..."
+
+[[rules]]
+id = "silent-except"
+class = "silent_failure"
+# A convention, not a bug detector: most bare swallows in the suite are deliberate best-effort
+# calls (cache frees, GPU probes). The rule makes that intent explicit, so the few real silent
+# failures stand out. The auditor doesn't count its hits as silent_failure findings.
+kind = "convention"
+tool = "ruff"
+codes = ["S110", "S112"]
+severity = "LOW"
+message = "A bare except-pass/continue hides failures. If the swallow is deliberate, write contextlib.suppress(...) with a comment; otherwise log it or narrow the except."
+
+[[rules]]
+id = "predictable-tmp"
+class = "path_traversal"
+tool = "ruff"
+codes = ["S108"]
+severity = "LOW"
+message = "A fixed /tmp path can be planted by another user. Use tempfile.mkstemp / TemporaryDirectory."
+
+[[rules]]
+id = "request-path-to-fs"
+class = "path_traversal"
+tool = "semgrep"
+severity = "HIGH"
+message = "Request input reaches a filesystem path. Use argus_cortex.fs.safe_join(root, value), or safe_name for a single id, which returns the resolved path under root or raises PathRefused."
+
+[[rules]]
+id = "request-url-outbound"
+class = "ssrf"
+tool = "semgrep"
+severity = "HIGH"
+message = "Request input becomes the URL of an outbound call (SSRF). Fetch it with argus_cortex.net.fetch / afetch, which checks every resolved address, pins the connection and re-checks redirects; pass allow_hosts for internal services."
+
+[[rules]]
+id = "token-compare"
+class = "secret_exposure"
+tool = "semgrep"
+severity = "MEDIUM"
+message = "A secret is compared with == or !=, which leaks it through timing. For an admin route use argus_cortex.auth.bearer(...); otherwise hmac.compare_digest on bytes."
+
+[[rules]]
+id = "agpl-import"
+class = "licence_violation"
+tool = "semgrep"
+severity = "HIGH"
+message = "An AGPL package (nudenet, ultralytics) is imported in-process, which puts this package under the AGPL. Call it over HTTP from its own service, as argus_cortex.moderation does."
+
+[[rules]]
+id = "blocking-in-async"
+class = "blocking_io_async"
+tool = "ruff"
+# flake8-async: blocking HTTP (requests, urllib, httpx sync), subprocesses, open() and time.sleep
+# inside `async def`. One such call freezes the whole event loop: every other request on that
+# worker waits until it returns, and a hang there wedges the server. ASYNC240 (Path.exists,
+# .resolve, .mkdir...) is left out: on local disks those are microsecond stat calls, and across
+# the suite it was nearly all of this rule's hits.
+codes = ["ASYNC210", "ASYNC212", "ASYNC220", "ASYNC221", "ASYNC222", "ASYNC230", "ASYNC251"]
+severity = "MEDIUM"
+message = "A blocking call inside async def stalls the event loop, so every other request on the worker waits. Await an async client (httpx.AsyncClient, asyncio.create_subprocess_exec, asyncio.sleep), or run it with await asyncio.to_thread(...)."
+
+[[rules]]
+id = "handler-scans-all"
+class = "unbounded_resource"
+tool = "semgrep"
+# LOW: many hits are listing endpoints over directories that stay small; those take a reasoned
+# nosemgrep. The ones that grow with use (jobs, uploads, generated items) are the real cost.
+severity = "LOW"
+message = "A route handler lists or walks a directory on every request, so its cost grows with the data and concurrent requests queue behind it. Keep an index updated on write (or cached by mtime) and look items up by key."
+
+[[rules]]
+id = "sibling-checkout-read"
+class = "unhandled_error"
+# SUITE.md shared rule: repos talk over HTTP or a versioned schema, never by reading another repo's
+# files. A convention: no hits across the suite at adoption; it keeps the boundary from eroding.
+kind = "convention"
+tool = "semgrep"
+severity = "MEDIUM"
+message = "This path reaches into a sibling repo's checkout. Call its service, or depend on the package it publishes."
+
+[[rules]]
+id = "cortex-copy"
+class = "fail_open"
+# SUITE.md shared rule: shared code lives in cortex, import it, don't copy it. A local copy of a
+# guard (safe_join, WriteGuard, the moderation labels) misses cortex's fixes and fails open.
+kind = "convention"
+tool = "semgrep"
+severity = "LOW"
+message = "This redefines a helper argus-cortex ships (safe_join, safe_name, env_flag, WriteGuard, DEFAULT_EXPOSED_LABELS). Import it from argus_cortex instead."

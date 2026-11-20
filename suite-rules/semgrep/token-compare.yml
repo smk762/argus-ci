@@ -1,0 +1,48 @@
+rules:
+  - id: token-compare
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A secret is compared with == or !=, which leaks it through timing. For an admin route use argus_cortex.auth.bearer(...); otherwise hmac.compare_digest on bytes.
+    metadata:
+      class: secret_exposure
+      catalogue: argus-ci/suite-rules
+    paths:
+      exclude:
+        - "tests/"
+        - "test_*.py"
+        - "*_test.py"
+        - "conftest.py"
+    patterns:
+      - pattern-either:
+          # An HMAC computed here and compared with ==
+          - pattern: $A == hmac.new(...).$D()
+          - pattern: hmac.new(...).$D() == $A
+          - pattern: $A != hmac.new(...).$D()
+          - pattern: hmac.new(...).$D() != $A
+          - patterns:
+              - pattern-either:
+                  - pattern: $A == $B
+                  - pattern: $A != $B
+              - metavariable-regex:
+                  metavariable: $A
+                  regex: '(?i)^(?!.*(count|len|limit|budget|usage|total|type|kind|name|_id\b|\.id\b|max|min|num|expir|ttl|_at\b|scope|format|prefix|path|url|sha|digest|hash|checksum|etag)).*(token|secret|api_?key|password|passwd|authorization|bearer|credential)'
+          - patterns:
+              - pattern-either:
+                  - pattern: $A == $B
+                  - pattern: $A != $B
+              - metavariable-regex:
+                  metavariable: $B
+                  regex: '(?i)^(?!.*(count|len|limit|budget|usage|total|type|kind|name|_id\b|\.id\b|max|min|num|expir|ttl|_at\b|scope|format|prefix|path|url|sha|digest|hash|checksum|etag)).*(token|secret|api_?key|password|passwd|authorization|bearer|credential)'
+      # Both sides must be values: comparing with a literal or None isn't checking a secret.
+      - pattern-not: $A == "..."
+      - pattern-not: $A != "..."
+      - pattern-not: '"..." == $B'
+      - pattern-not: '"..." != $B'
+      - pattern-not: $A == None
+      - pattern-not: $A != None
+      # SQL filters compare in the database, not in Python.
+      - pattern-not-inside: $Q.where(...)
+      - pattern-not-inside: $Q.filter(...)
+      - pattern-not-inside: $Q.filter_by(...)
+      - pattern-not-inside: select(...).where(...)

@@ -1,0 +1,56 @@
+name: bombadil self-test
+
+# Proves the reusable bombadil.yml end to end on bombadil-fixture/, a two-page static site:
+# the clean build must pass, and a build whose home page logs a console error must be caught
+# with noConsoleErrors (through the workflow's `violations` output).
+
+on:
+  pull_request:
+    paths: [".github/workflows/bombadil*.yml", "bombadil-fixture/**"]
+  push:
+    branches: [dev]
+    paths: [".github/workflows/bombadil*.yml", "bombadil-fixture/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean:
+    name: clean build must pass
+    uses: ./.github/workflows/bombadil.yml
+    with:
+      working-directory: bombadil-fixture
+      build-command: npm run build:ok
+      time-limit: 30s
+      timeout-minutes: 10
+
+  broken:
+    # The fixture logs a console error and Bombadil must catch it. continue-on-error keeps this job
+    # green and reports the violation through `violations`; broken-is-caught is the verdict.
+    name: broken build reports a violation
+    uses: ./.github/workflows/bombadil.yml
+    with:
+      working-directory: bombadil-fixture
+      build-command: npm run build:broken
+      time-limit: 2m
+      timeout-minutes: 10
+      continue-on-error: true
+
+  broken-is-caught:
+    name: broken build was caught (noConsoleErrors)
+    needs: broken
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: The broken build violated noConsoleErrors
+        env:
+          VIOLATIONS: ${{ needs.broken.outputs.violations }}
+        run: |
+          echo "violations: ${VIOLATIONS:-none}"
+          case " $VIOLATIONS " in
+            *" noConsoleErrors "*)
+              echo "caught"
+              echo "Bombadil caught the fixture's deliberate console error (\`noConsoleErrors\`)." >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo "::error::bombadil.yml did not report noConsoleErrors on the broken fixture"; exit 1 ;;
+          esac

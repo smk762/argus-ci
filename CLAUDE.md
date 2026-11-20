@@ -1,12 +1,13 @@
 # CLAUDE.md — argus-ci
 
-Guidance for AI agents working in this repo. Human-facing usage lives in [README.md](README.md); this file is the orientation an agent needs to change these workflows safely.
+Guidance for AI agents working in this repo. Human-facing usage, including the inputs table for each workflow, lives
+in [README.md](README.md).
 
 ## What this is
 
-**Not a package** — no `src/`, no `pyproject.toml`, no tests to run here. This repo is the shared **reusable GitHub Actions workflows** for the Argus suite. One place to define the `uv` + `ruff` + `pytest` + `build` pipeline so every downstream repo stays in lockstep instead of drifting.
-
-Editing a file here changes CI for **every consumer at once**. The contract you are maintaining is the set of `workflow_call` inputs and the steps they drive — treat inputs like a public API.
+**Not a package.** There is no `src/` and no `pyproject.toml`. This repo holds the Argus suite's **reusable GitHub
+Actions workflows**, plus the **suite-rules** lint catalogue. Editing a file here changes CI for **every consumer at
+once**. The `workflow_call` inputs and secrets are a public API, and consumers pin a major tag (`@v1`).
 
 ## Argus suite
 <!-- argus-suite: keep this block; argus-ci checks for it -->
@@ -18,52 +19,63 @@ argus-cortex's SUITE.md** (a PR to argus-cortex in the same release).
 
 Not checked out? Read https://github.com/smk762/argus-cortex/blob/dev/SUITE.md
 
+## Must never happen
+
+Each row names what enforces it. An **UNENFORCED** row is a known gap: when one bites, add a check, not more prose.
+
+| Never | Enforced by |
+|---|---|
+| A reusable workflow loses an input or a secret, changes an input's type, or gains a required one | `self-check.yml` → `scripts/check_workflows.py`, compared with `v1` (`scripts/test_check_workflows.py`) |
+| `v1` moved over a breaking change | The same check. `dev` stays `v1`-compatible, and a deliberate break must change `BASE` in `self-check.yml` to the new major in the same PR |
+| A workflow with no top-level `permissions:`, or a `pull_request_target` trigger | `scripts/check_workflows.py` (hygiene) |
+| A workflow that fails syntax, expression or shellcheck checks | `self-check.yml` → actionlint |
+| A suite rule without a positive and a negative fixture, or one that fires on its negative | `suite-rules-self-test.yml` (`check.py fixtures`, `test_check.py`) |
+| A consumer's suite-rules baseline that grows | `check.py check --base-baseline` (`test_check.py::test_ratchet_rejects_a_growing_baseline`) |
+| Stale generated semgrep rules | `suite-rules-self-test.yml` (`_generate.py` + `git diff --exit-code`) |
+| A consumer's CLAUDE.md without the argus-suite block, or a repo with no SUITE.md row | `suite-check.yml` |
+| The "Not checked out?" link pointing at `blob/main` | `suite-check.yml`, as a **warning** until the fleet is fixed. Then make it an error |
+| Release or publish (PyPI OIDC) inside a reusable workflow | PyPI refuses it (its `job_workflow_ref` check). Each repo keeps a top-level `release.yml` from argus-pkg-template |
+| A secret-derived value echoed without `::add-mask::` first | **UNENFORCED** |
+| A docs-check hygiene regex widened without running it over the siblings' docs first | **UNENFORCED** (it is a fleet gate: one bad pattern fails every consumer) |
+| A third-party action not pinned to a major tag (or to a full commit SHA with a `# vN` comment), or pinned to an older major than the same action elsewhere here | **UNENFORCED** |
+
 ## Layout
 
-```
-.github/workflows/
-  python-ci.yml     # reusable Python pipeline (`on: workflow_call`)
-  suite-check.yml   # reusable suite-map check: CLAUDE.md block + SUITE.md row (`on: workflow_call`)
-  docs-check.yml    # reusable docs check: Typer CLI reference drift + published-docs hygiene scan
-  suite.yml         # this repo's own caller of suite-check.yml
-README.md         # source of truth for the caller-facing usage + inputs table
-```
+- `.github/workflows/python-ci.yml`: the reusable Python pipeline (uv, ruff, pytest, build).
+- `.github/workflows/suite-check.yml`: the reusable suite-map check.
+- `.github/workflows/docs-check.yml`: the reusable docs check (CLI reference drift, published-docs hygiene).
+- `.github/workflows/suite-rules.yml`: the reusable suite-rules check.
+- `.github/workflows/bombadil.yml`: the reusable Bombadil UI check (static build, served locally). `bombadil-fixture/` + `bombadil-self-test.yml` prove it.
+- `suite.yml`, `suite-rules-self-test.yml`, `bombadil-self-test.yml` and `self-check.yml` are this repo's own CI.
+- `suite-rules/`: the catalogue (`catalogue.toml`), semgrep rules, fixtures, and `check.py`.
+- `scripts/check_workflows.py`: the hygiene and input-compatibility check.
 
-`python-ci.yml` defines three jobs, all on `ubuntu-latest` via `astral-sh/setup-uv@v6` (cache enabled):
+## Suite rules
 
-- **`lint`** — `uvx ruff check` + `ruff format --check` over `lint-paths`.
-- **`test`** — matrix over `python-versions`; `uv venv` → `uv pip install -e ".[test-extras]"` → `uv run --no-sync pytest`; optional `post-test` command (e.g. a schema check) last. Checkout uses `fetch-depth: 0` so hatch-vcs can derive the dev version.
-- **`build`** — `needs: [lint, test]`; `uv build` → uploads the `dist/` artifact (14-day retention).
+`suite-rules/catalogue.toml` lists rules. Each rule names the ai-code-auditor finding class it eliminates
+(`config/finding_classes.yaml` there), and the auditor runs the same `check.py` nightly, so its findings and CI agree.
 
-Inputs (defaults): `python-versions` `["3.11","3.12"]`, `test-extras` `dev`, `ruff-version` `""` (latest), `lint-paths` `src/ tests/`, `post-test` `""`. See the README table for the authoritative descriptions.
+- **A new guard rule** needs a fixture pair under `fixtures/<id>/`, and the same class with a `static_rules.suite`
+  entry in ai-code-auditor. Land the auditor side first: the auditor doesn't map a rule it hasn't seen, so it sends
+  that rule's hits to its model classifier instead. `kind = "convention"` rules enforce a code shape and are not counted as findings.
+- **A repo opts in** with `suite-rules.yml`. Existing hits go in its `.suite-rules-baseline.json`, which may only
+  shrink. Silence one hit with a reasoned `# noqa: <code>` or `# nosemgrep: <id>` on that line.
+- **The tool pins** (ruff, semgrep) live in the catalogue's `[tools]`. CI and the auditor both read them from there.
+- **Before adding or widening a rule**, run it over every repo's `origin/dev`, and record the false positives in the PR.
 
-## How it's consumed
+## Releasing
 
-Downstream repos add a thin caller at `.github/workflows/ci.yml` that pins a **major tag** and passes inputs:
+Consumers pin `@v1`. A backward-compatible change fast-forwards the tag: `git tag -f v1 <sha> && git push -f origin v1`.
+Moving it is a fleet change, so dry-run it from one consumer's branch first. A breaking change cuts `v2` and leaves
+`v1` where it is.
 
-```yaml
-jobs:
-  ci:
-    uses: smk762/argus-ci/.github/workflows/python-ci.yml@v1
-    with:
-      test-extras: "dev,server,cli"
-      post-test: "uv run --no-sync argus-curator schema --check"
-```
+## Gotchas
 
-There is no local test harness in this repo. To validate a workflow edit before pushing, lint it with [`actionlint`](https://github.com/rhysd/actionlint) (`actionlint .github/workflows/python-ci.yml`) and, ideally, dry-run the change from a real consumer's branch before moving the `v1` tag.
-
-## Conventions & gotchas
-
-- **Every change is a fleet change.** A broken step or a renamed/removed input breaks CI in all consumers simultaneously. Add inputs with safe defaults; treat removing or renaming one as breaking.
-- **Versioning by moving major tags.** Consumers pin `@v1`. Backward-compatible changes: fast-forward `v1` to the new commit (`git tag -f v1 <sha> && git push -f origin v1`). Breaking input changes: cut a new `v2` and leave `v1` where it is.
-- **Secrets.** `python-ci.yml` and `suite-check.yml` take only `inputs:`. `docs-check.yml` declares one optional secret, `denylist`, under `workflow_call.secrets`; callers forward it explicitly. Any new secret must be `required: false` (fork PRs get none) and documented in the README. Never echo a secret-derived value without `::add-mask::` first.
-- **`docs-check` hygiene regexes are a fleet gate.** Widening a pattern can fail every consumer at once. Run the scanner over the sibling repos' `README.md` + `docs/**/*.md` before changing it.
-- **Release/publish is deliberately NOT here.** PyPI [trusted publishing (OIDC) cannot run inside a reusable workflow](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github) — the `job_workflow_ref` check rejects it. Each repo keeps a **top-level** `release.yml`; its canonical form lives in [`argus-pkg-template`](https://github.com/smk762/argus-pkg-template) (`copier update` to re-sync). Do not try to fold release into this file.
-- **Ruff is unpinned by default** (`ruff-version: ""` → latest). Consumers wanting reproducible lint pass an explicit pin (e.g. `0.15.16`); the `format('@{0}', …)` expression wires that into the `uvx ruff@<ver>` invocation.
-- **`uv run --no-sync`** everywhere — the editable install is already done in a prior step; `--no-sync` stops uv re-resolving and re-installing.
-- **`post-test` runs arbitrary caller-supplied shell** in the test env by design (schema checks, extra gates). That's expected; keep it opt-in and empty by default.
-- **Pin third-party actions to a major tag** (`@v7`) as the existing steps do; keep them consistent when bumping. `astral-sh/setup-uv` stopped publishing floating major tags after `v7` (later releases are full semver only), so moving past `@v7` means a full version pin.
+- `post-test` runs arbitrary caller-supplied shell in the test env. That's by design: keep it opt-in and empty by default.
+- `uv run --no-sync` everywhere: the editable install already happened, and `--no-sync` stops uv re-resolving.
+- `astral-sh/setup-uv` publishes no floating major tags after `v7`, so moving past `@v7` means a full version pin.
+- New secrets must be `required: false` (fork PRs get none) and documented in the README.
 
 ## Branches
 
-`dev` is the default branch and the base for every PR. Cut feature branches from `origin/dev` and bring them up to date by merging `origin/dev`, never `main`. Never open a PR against `main` or push work to it directly: `main` must never be ahead of `dev`. A release fast-forwards `main` to a `dev` commit that passed CI (`git push origin origin/dev:main`), then tags it. If `main` is protected and needs a PR, merge the release PR, then immediately merge `main` back into `dev` so the merge commit is not left on `main` alone.
+`dev` is the default branch and the base for every PR. Cut feature branches from `origin/dev` and bring them up to date by merging `origin/dev`, never `main`. Never push work to `main` or open a PR against it, except the release PR from `dev`: `main` must never be ahead of `dev`, with one exception. A release fast-forwards `main` to a `dev` commit that passed CI (`git push origin origin/dev:main`), then tags it. If `main` is protected, the release is a reviewed PR from `dev` into `main`, and merging it leaves a merge commit on `main` alone. That merge commit is the one exception to the rule: it leaves `main` one commit ahead of `dev` with an identical tree. Leave it there and don't merge `main` back into `dev`. Anything else on `main` that `dev` lacks is a mistake (`git diff origin/dev origin/main` must be empty). Once `main` carries such a commit it can't be fast-forwarded, so later releases are PRs too.

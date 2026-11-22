@@ -62,3 +62,81 @@ def export_file(name: str):
     from argus_cortex.fs import safe_join as cortex_safe_join
 
     return FileResponse(cortex_safe_join(UPLOAD_DIR, name))
+
+
+@app.get("/rel/{name}")
+def rel(name: str):
+    p = RECORDINGS / name
+    p.resolve().relative_to(RECORDINGS.resolve())
+    return FileResponse(p)
+
+
+@app.get("/common/{name}")
+def common(name: str):
+    import os
+
+    p = f"{RECORDINGS}/{name}"
+    if os.path.commonpath([str(RECORDINGS), os.path.realpath(p), p]) != str(RECORDINGS):
+        raise HTTPException(404)
+    return FileResponse(p)
+
+
+@app.get("/chain/{name}")
+def chain(name: str):
+    p = RECORDINGS / name
+    if not name or not p.resolve().is_relative_to(RECORDINGS.resolve()):
+        return None
+    return FileResponse(p)
+
+
+def is_safe_name(value: str) -> bool:
+    return value.isalnum()
+
+
+@app.get("/pred/{name}")
+def pred(name: str):
+    if not is_safe_name(name):
+        raise HTTPException(400)
+    return FileResponse(RECORDINGS / name)
+
+
+def validate_name(value: str) -> None:
+    if not value.isalnum():
+        raise HTTPException(400)
+
+
+@app.get("/val/{name}")
+def val(name: str):
+    validate_name(name)
+    return FileResponse(RECORDINGS / name)
+
+
+@app.get("/bare/{name}")
+def bare(name: str):
+    if name not in ("a.wav", "b.wav"):
+        return
+    (RECORDINGS / name).unlink()
+
+
+@app.get("/parent/{name}")
+def parent(name: str):
+    path = RECORDINGS / name
+    if not path.is_file() or path.resolve().parent != RECORDINGS.resolve():
+        raise HTTPException(404)
+    return FileResponse(path)
+
+
+@app.get("/manifest/{name}")
+def manifest_file(name: str):
+    images = {"plate.png": 1, "depth.png": 2}
+    if name not in images:
+        raise HTTPException(404)
+    return FileResponse(RECORDINGS / name)
+
+
+@app.get("/models/{name}")
+def model(name: str):
+    models = {"a.glb": 1}
+    if name in models:
+        return FileResponse(RECORDINGS / name)
+    raise HTTPException(404)

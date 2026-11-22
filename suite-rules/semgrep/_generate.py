@@ -61,44 +61,66 @@ def sources() -> str:
     return "\n".join(lines)
 
 
-SANITIZERS = """    pattern-sanitizers:
+# A rejecting guard: `if <cond>: raise / abort / return`, with the code after it in scope.
+REJECTS = ("raise ...", "abort(...)", "flask.abort(...)", "return ...")  # `return ...` also matches a bare return
+
+
+def _guard(conds: list[str], comment: str, where: str = "") -> str:
+    """A sanitizer for $X after `if <one of conds>: <reject>`. `<... c ...>` lets the test sit in an and/or chain
+    (semgrep doesn't carry side effects out of a short-circuit chain)."""
+    out = [f"      # {comment}", "      - patterns:", "          - pattern-either:"]
+    for c in conds:
+        for rej in REJECTS:
+            out.append(f"              - pattern-inside: |\n                  if <... {c} ...>:\n"
+                       f"                      ...\n                      {rej}\n                  ...")
+    return "\n".join(out) + where + "\n          - pattern: $X"
+
+
+# Callee names, anchored on the function's own name (the last dotted part).
+# Validators that raise on a bad value clear it by side effect; predicates only count inside a rejecting guard.
+RAISING_VALIDATOR = r"^(.*\.)?(validate_\w+|ensure_(safe|valid|allowed|within|under)\w*|require_(safe|valid|allowed|within|under)\w*|safe_join|safe_name|safe_path|resolve_under\w*|\w+_or_404)$"
+PREDICATE = r"^(.*\.)?(is_\w*(safe|valid|allowed|permitted|within|under_root)\w*|\w+_is_(safe|valid|allowed)|allowed_\w+|\w+_(allowed|permitted))$"
+
+SANITIZERS = "\n".join([
+    """    pattern-sanitizers:
       - pattern: int(...)
       - pattern: float(...)
       - pattern: os.path.basename(...)
       - pattern: Path(...).name
       - pattern: PurePath(...).name
-      # A validation call, an allow-list membership test or a containment check clears the value
-      # it checks from then on, whether or not it is used as the condition of an if.
+      # A validator that raises on a bad value clears it from then on.
       - by-side-effect: true
         patterns:
           - pattern: $F(..., $X, ...)
           - metavariable-regex:
               metavariable: $F
-              regex: (?i).*(safe|secure|sanitiz|validat|allow|within|under_root|check|require|match|or_404|resolve_under).*
+              regex: """ + RAISING_VALIDATOR + """
           - focus-metavariable: $X
+      # relative_to raises ValueError when the resolved path is outside the root.
       - by-side-effect: true
         patterns:
-          - pattern-either:
-              - pattern: $X in $C
-              - pattern: $X not in $C
-          - focus-metavariable: $X
-      # Resolving a path is how code checks containment (is_relative_to, parent ==, commonpath).
-      - by-side-effect: true
-        patterns:
-          - pattern: $X.resolve(...)
-          - focus-metavariable: $X
-      - by-side-effect: true
-        patterns:
-          - pattern: os.path.commonpath([..., $X, ...])
-          - focus-metavariable: $X
-      # A guard that rejects early: `if <... X.resolve() ... or a validator of X ...>: raise`.
-      # (semgrep doesn't carry side effects out of a short-circuit `or` chain, so say it directly.)
+          - pattern: $X.resolve(...).relative_to(...)
+          - focus-metavariable: $X""",
+    _guard(["not $X.resolve(...).is_relative_to(...)", "not $X.is_relative_to(...)",
+            "$X.resolve(...).parent != $B", "$B != $X.resolve(...).parent",
+            "os.path.commonpath([..., $X, ...]) != $B", "$B != os.path.commonpath([..., $X, ...])"],
+           "A containment guard: `if not X.resolve().is_relative_to(root): raise`, or the parent / commonpath form."),
+    _guard(["not $F(..., $X, ...)"], "A predicate validator as a rejecting guard: `if not is_safe(X): abort(400)`.",
+           "\n          - metavariable-regex:\n              metavariable: $F\n              regex: " + PREDICATE),
+    _guard(["$X not in $C"], "An allow-list guard: `if X not in ALLOWED: raise`. A membership test that rejects nothing\n"
+           "      # (`if url in cache: ...`, `if name not in seen: seen.add(name)`) is not one."),
+    """      # The body of `if X in ALLOWED:`, but not when that if has an else (semgrep's pattern-inside would cover it).
       - patterns:
           - pattern-inside: |
-              if <... $X.resolve() ...>:
-                  raise ...
-              ...
-          - pattern: $X"""
+              if <... $X in $C ...>:
+                  ...
+          - pattern-not-inside: |
+              if <... $X in $C ...>:
+                  ...
+              else:
+                  ...
+          - pattern: $X""",
+])
 
 PATH_SINKS = """    pattern-sinks:
       # Where the path is used, not where it is built: code often builds a path and checks it
@@ -124,32 +146,56 @@ PATH_SINKS = """    pattern-sinks:
                       regex: ^(open|read_text|read_bytes|write_text|write_bytes|unlink|rmdir|mkdir|rename|replace|touch|symlink_to|iterdir|glob|rglob)$
           - focus-metavariable: $P"""
 
-URL_SINKS = """    pattern-sinks:
-      # Only when the request value is (or starts) the URL: a fixed base URL with a request value
-      # appended later can't move the host, so f-strings and concatenations are not sinks.
-      - patterns:
-          - pattern-either:
-              - pattern: requests.$M($U, ...)
-              - pattern: requests.$M(url=$U, ...)
-              - pattern: httpx.$M($U, ...)
-              - pattern: httpx.$M(url=$U, ...)
-              - pattern: urllib.request.urlopen($U, ...)
-              - pattern: urlopen($U, ...)
-              - patterns:
-                  - pattern-either:
-                      - pattern: $C.$M($U, ...)
-                      - pattern: $C.$M(url=$U, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-          - pattern-not: $X.$M(f"...", ...)
-          - pattern-not: $X.$M("..." + $Y, ...)
-          - pattern-not: $X.$M($A + $B, ...)
-          - pattern-not: $X.$M("...".format(...), ...)
-          - focus-metavariable: $U"""
+
+def _url_calls(arg: str) -> str:
+    """`- pattern-either:` over the outbound calls, with `arg` as the URL argument (positional or url=)."""
+    out = ["          - pattern-either:"]
+    for call in ("requests.$M", "httpx.$M", "urllib.request.urlopen", "urlopen"):
+        out.append(f"              - pattern: {call}({arg}, ...)")
+        if call.endswith("$M"):
+            out.append(f"              - pattern: {call}(url={arg}, ...)")
+    out += [
+        "              - patterns:",
+        "                  - pattern-either:",
+        f"                      - pattern: $C.$M({arg}, ...)",
+        f"                      - pattern: $C.$M(url={arg}, ...)",
+        "                  - metavariable-regex:",
+        "                      metavariable: $C",
+        "                      regex: (?i).*(client|session|http).*",
+        "                  - metavariable-regex:",
+        "                      metavariable: $M",
+        "                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$",
+    ]
+    return "\n".join(out)
+
+
+TEMPLATES = ('f"..."', "$A + $B", "$S.format(...)")
+
+URL_SINKS = "\n".join([
+    """    pattern-sinks:
+      # Only what decides the scheme and host is a sink: the URL itself, or the leading part of a template.
+      # A request value after a constant prefix (f"https://api/{x}", BASE + x) can't move the host.
+      - patterns:""",
+    _url_calls("$U"),
+    *(f"          - pattern-not: $F({kw}{t}, ...)" for t in TEMPLATES for kw in ("", "url=")),
+    """          - focus-metavariable: $U
+      # A template: the sink is its leading part (f"{U}/api", U + "/x").
+      - patterns:""",
+    _url_calls("$ARG"),
+    """          - metavariable-pattern:
+              metavariable: $ARG
+              pattern-either:
+                - pattern: f"{$U}..."
+                - pattern: $U + $R
+          - focus-metavariable: $U
+      # "{}/x".format(u): the placeholder leads, so every format argument is a sink.
+      - patterns:""",
+    _url_calls("$S.format(..., $U, ...)"),
+    """          - metavariable-regex:
+              metavariable: $S
+              regex: ^[rRbBuU]*["']\\{
+          - focus-metavariable: $U""",
+])
 
 EXCLUDE = """    paths:
       exclude:

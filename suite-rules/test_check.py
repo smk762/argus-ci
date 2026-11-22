@@ -1,6 +1,7 @@
 """Unit tests for the baseline and ratchet (stdlib unittest; the fixtures prove the rules)."""
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -177,6 +178,48 @@ class Generate(unittest.TestCase):
         src = _generate.sources()
         for p in ("request.headers", "request.cookies", "request.url", "await request.body()", "request.stream()"):
             self.assertIn(f"- pattern: {p}\n", src + "\n", p)
+
+    def test_validator_names_are_anchored(self):
+        import re
+        raising, predicate = re.compile(_generate.RAISING_VALIDATOR), re.compile(_generate.PREDICATE)
+        for name in ("re.match", "fnmatch", "log_check", "shallow_copy", "checksum", "subprocess.check_output",
+                     "require", "ensure_dir", "safely_log"):
+            self.assertFalse(raising.match(name) or predicate.match(name), name)
+        for name in ("validate_name", "argus_cortex.fs.safe_join", "safe_name", "get_or_404", "ensure_within_root"):
+            self.assertTrue(raising.match(name), name)
+        for name in ("is_safe_name", "allowed_file", "host_is_allowed", "is_within_root"):
+            self.assertTrue(predicate.match(name), name)
+
+    def test_no_sanitizer_clears_a_value_without_a_check(self):
+        san = _generate.SANITIZERS
+        # A bare resolve(), an unguarded membership test or a bare commonpath() checks nothing.
+        for gone in ("- pattern: $X.resolve(...)\n", "- pattern: $X in $C\n", "- pattern: $X not in $C\n",
+                     "- pattern: os.path.commonpath([..., $X, ...])\n", "if <... $X.resolve() ...>:"):
+            self.assertNotIn(gone, san + "\n", gone)
+        # Every guard that is not a raising call has to reject: no `if X in C: pass`-style sanitizer.
+        self.assertEqual(san.count("by-side-effect: true"), 2)
+
+    def test_url_templates_are_sinks_at_their_leading_part(self):
+        sinks = _generate.URL_SINKS
+        self.assertIn('- pattern: f"{$U}..."', sinks)
+        self.assertIn("- pattern: $U + $R", sinks)
+        self.assertNotIn('pattern-not: $X.$M("..." + $Y, ...)', sinks)
+
+
+def _semgrep_available() -> bool:
+    import shutil
+    return bool(os.environ.get("SEMGREP")) or shutil.which("semgrep") is not None
+
+
+@unittest.skipUnless(_semgrep_available(), "needs semgrep ($SEMGREP or on PATH); CI sets $SEMGREP")
+class TaintFixtures(unittest.TestCase):
+    """The taint rules against their fixtures: each positive file is one bypass the sanitizers must not clear."""
+
+    def test_taint_rules_hold_on_their_fixtures(self):
+        rules = [r for r in check.load_rules()[0] if r.id in ("request-path-to-fs", "request-url-outbound")]
+        self.assertEqual(len(rules), 2)
+        for res in check.fixtures(rules):
+            self.assertTrue(res["ok"], f"{res['rule']}: {res['note']}")
 
 
 if __name__ == "__main__":

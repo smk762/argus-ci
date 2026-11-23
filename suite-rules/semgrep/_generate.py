@@ -65,15 +65,52 @@ def sources() -> str:
 REJECTS = ("raise ...", "abort(...)", "flask.abort(...)", "return ...")  # `return ...` also matches a bare return
 
 
+# The check dominates the reject when it is the whole test or a direct `or` operand: surviving
+# means that operand was false. An `and` operand does not (`if flag and bad(x): raise` falls
+# through while x is bad), and a further `not` flips the test. `<... c ...>` matches both.
+_GUARD_FORMS = (
+    "if {c}:",
+    "if {c} or ...:",
+    "if ... or {c}:",
+    "if ... or {c} or ...:",
+)
+
+
 def _guard(conds: list[str], comment: str, where: str = "") -> str:
-    """A sanitizer for $X after `if <one of conds>: <reject>`. `<... c ...>` lets the test sit in an and/or chain
-    (semgrep doesn't carry side effects out of a short-circuit chain)."""
+    """A sanitizer for $X after a rejecting guard that one of `conds` dominates."""
     out = [f"      # {comment}", "      - patterns:", "          - pattern-either:"]
     for c in conds:
-        for rej in REJECTS:
-            out.append(f"              - pattern-inside: |\n                  if <... {c} ...>:\n"
-                       f"                      ...\n                      {rej}\n                  ...")
+        for form in _GUARD_FORMS:
+            for rej in REJECTS:
+                out.append(f"              - pattern-inside: |\n                  {form.format(c=c)}\n"
+                           f"                      ...\n                      {rej}\n                  ...")
     return "\n".join(out) + where + "\n          - pattern: $X"
+
+
+def _in_allowlist_body() -> str:
+    """The body of `if X in ALLOWED` when that check dominates and the if has no else.
+
+    Inside the body an `and` operand is true; an `or` operand is not (`if X in ALLOWED or flag`),
+    and a negated test is the complement. The else branch is the complement too.
+    """
+    forms = (
+        "if $X in $C:",
+        "if $X in $C and ...:",
+        "if ... and $X in $C:",
+        "if ... and $X in $C and ...:",
+    )
+    lines = [
+        "      # The body of `if X in ALLOWED`, when that check dominates and the if has no else.",
+        "      - patterns:",
+        "          - pattern-either:",
+    ]
+    for form in forms:
+        lines.append(f"              - pattern-inside: |\n                  {form}\n                      ...")
+    for form in forms:
+        lines.append("          - pattern-not-inside: |\n"
+                     f"              {form}\n                  ...\n              else:\n                  ...")
+    lines.append("          - pattern: $X")
+    return "\n".join(lines)
 
 
 # Callee names, anchored on the function's own name (the last dotted part).
@@ -85,9 +122,7 @@ SANITIZERS = "\n".join([
     """    pattern-sanitizers:
       - pattern: int(...)
       - pattern: float(...)
-      - pattern: os.path.basename(...)
-      - pattern: Path(...).name
-      - pattern: PurePath(...).name
+      # basename('..') and Path('..').name are '..', so neither confines a path.
       # A validator that raises on a bad value clears it from then on.
       - by-side-effect: true
         patterns:
@@ -109,18 +144,33 @@ SANITIZERS = "\n".join([
            "\n          - metavariable-regex:\n              metavariable: $F\n              regex: " + PREDICATE),
     _guard(["$X not in $C"], "An allow-list guard: `if X not in ALLOWED: raise`. A membership test that rejects nothing\n"
            "      # (`if url in cache: ...`, `if name not in seen: seen.add(name)`) is not one."),
-    """      # The body of `if X in ALLOWED:`, but not when that if has an else (semgrep's pattern-inside would cover it).
-      - patterns:
-          - pattern-inside: |
-              if <... $X in $C ...>:
-                  ...
-          - pattern-not-inside: |
-              if <... $X in $C ...>:
-                  ...
-              else:
-                  ...
-          - pattern: $X""",
+    _in_allowlist_body(),
 ])
+
+# taint_assume_safe_functions would swallow these calls. They pass '..' through, so the
+# argument's taint has to reach the result. by-side-effect is false so the function itself
+# is not tainted for a later call with a safe argument.
+PROPAGATORS = r"""    pattern-propagators:
+      - by-side-effect: false
+        patterns:
+          - pattern: $F($X)
+          - focus-metavariable: $F
+          - metavariable-regex:
+              metavariable: $F
+              regex: ^(.*\.)?basename$
+        from: $X
+        to: $F
+      - by-side-effect: false
+        patterns:
+          - pattern: $F($X).name
+          - focus-metavariable: $F
+          - metavariable-regex:
+              metavariable: $F
+              regex: ^(.*\.)?(Pure)?Path$
+        from: $X
+        to: $F
+"""
+
 
 PATH_SINKS = """    pattern-sinks:
       # Where the path is used, not where it is built: code often builds a path and checks it
@@ -147,13 +197,35 @@ PATH_SINKS = """    pattern-sinks:
           - focus-metavariable: $P"""
 
 
+_CLIENT = "(?i).*(client|session|http).*"
+# Methods whose first positional argument is the URL. `request(method, url)` is not one of them:
+# binding `$M` to `request` would treat the method string as the URL and miss the real one.
+_URL_FIRST = "^(get|post|put|patch|delete|head|options|stream)$"
+
+
 def _url_calls(arg: str) -> str:
-    """`- pattern-either:` over the outbound calls, with `arg` as the URL argument (positional or url=)."""
+    """`- pattern-either:` over the outbound calls, with `arg` as the URL.
+
+    `get`/`post`/etc take the URL first, and so does `url=`. `request(method, url)` and
+    `Client.request(method, url)` take it second. `urlopen(url=...)` is the keyword form of both
+    urlopen spellings.
+    """
     out = ["          - pattern-either:"]
-    for call in ("requests.$M", "httpx.$M", "urllib.request.urlopen", "urlopen"):
+    for call in ("requests.$M", "httpx.$M"):
+        out += [
+            "              - patterns:",
+            f"                  - pattern: {call}({arg}, ...)",
+            "                  - metavariable-regex:",
+            "                      metavariable: $M",
+            f"                      regex: {_URL_FIRST}",
+            f"              - pattern: {call}(url={arg}, ...)",
+        ]
+    for call in ("requests.request", "httpx.request"):
+        out.append(f"              - pattern: {call}($METHOD, {arg}, ...)")
+        out.append(f"              - pattern: {call}($METHOD, url={arg}, ...)")
+    for call in ("urllib.request.urlopen", "urlopen"):
         out.append(f"              - pattern: {call}({arg}, ...)")
-        if call.endswith("$M"):
-            out.append(f"              - pattern: {call}(url={arg}, ...)")
+        out.append(f"              - pattern: {call}(url={arg}, ...)")
     out += [
         "              - patterns:",
         "                  - pattern-either:",
@@ -161,25 +233,63 @@ def _url_calls(arg: str) -> str:
         f"                      - pattern: $C.$M(url={arg}, ...)",
         "                  - metavariable-regex:",
         "                      metavariable: $C",
-        "                      regex: (?i).*(client|session|http).*",
+        f"                      regex: {_CLIENT}",
         "                  - metavariable-regex:",
         "                      metavariable: $M",
-        "                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$",
+        f"                      regex: {_URL_FIRST}",
+        "              - patterns:",
+        "                  - pattern-either:",
+        f"                      - pattern: $C.request($METHOD, {arg}, ...)",
+        f"                      - pattern: $C.request($METHOD, url={arg}, ...)",
+        "                  - metavariable-regex:",
+        "                      metavariable: $C",
+        f"                      regex: {_CLIENT}",
     ]
     return "\n".join(out)
 
 
 TEMPLATES = ('f"..."', "$A + $B", "$S.format(...)")
 
+# A literal prefix pins the host only when it is scheme, host and a slash. Anything short of that
+# (`https://api.internal` + user, `f"https://{host}/x"`, `"http://{}".format(host)`) still chooses it.
+_PINNED_PREFIX = r"""^[rRbBuU]*["'][a-zA-Z][a-zA-Z0-9+.-]*://[^/"'{]+/"""
+_SLASH_LITERAL = r"""^[rRbBuU]*["']/"""
+_UNPINNED_FORMAT = r"""^[rRbBuU]*["'](\{|[a-zA-Z][a-zA-Z0-9+.-]*://[^/"'{]*\{)"""
+# An f-string hole sits in the authority when `{` occurs after `://` and before the next `/`.
+_UNPINNED_FSTRING = json.dumps(r"""://[^/"']*\{""")
+
+
+def _right_concat() -> str:
+    """`$L + $U` is a sink unless `$L` ends the authority, or a `"/..."` literal already closed it."""
+    return f"""          - metavariable-pattern:
+              metavariable: $ARG
+              patterns:
+                - pattern: $L + $U
+                - pattern-not:
+                    patterns:
+                      - pattern: $L + $U
+                      - metavariable-regex:
+                          metavariable: $L
+                          regex: {json.dumps(_PINNED_PREFIX)}
+                - pattern-not:
+                    patterns:
+                      - pattern: ($A + $S) + $U
+                      - metavariable-regex:
+                          metavariable: $S
+                          regex: {json.dumps(_SLASH_LITERAL)}
+          - focus-metavariable: $U"""
+
+
 URL_SINKS = "\n".join([
     """    pattern-sinks:
-      # Only what decides the scheme and host is a sink: the URL itself, or the leading part of a template.
-      # A request value after a constant prefix (f"https://api/{x}", BASE + x) can't move the host.
+      # The URL itself is a sink. A template is too, unless a constant prefix ends the authority
+      # (scheme, host and a slash). `f"https://{host}/x"`, `"http://{}".format(host)` and
+      # `BASE + user` still choose the host; `f"https://api.example.com/{id}"` does not.
       - patterns:""",
     _url_calls("$U"),
     *(f"          - pattern-not: $F({kw}{t}, ...)" for t in TEMPLATES for kw in ("", "url=")),
     """          - focus-metavariable: $U
-      # A template: the sink is its leading part (f"{U}/api", U + "/x").
+      # A template whose tainted part leads (f"{U}/api", U + "/x").
       - patterns:""",
     _url_calls("$ARG"),
     """          - metavariable-pattern:
@@ -188,12 +298,25 @@ URL_SINKS = "\n".join([
                 - pattern: f"{$U}..."
                 - pattern: $U + $R
           - focus-metavariable: $U
-      # "{}/x".format(u): the placeholder leads, so every format argument is a sink.
+      # An f-string hole before the authority-ending slash (f"https://{host}/x", f"https://api.{host}/x").
+      - patterns:""",
+    _url_calls("$ARG"),
+    f"""          - metavariable-pattern:
+              metavariable: $ARG
+              patterns:
+                - pattern: f"...{{$U}}..."
+                - pattern-regex: {_UNPINNED_FSTRING}
+          - focus-metavariable: $U
+      # Appended on the right: a sink unless the left side provably ends the authority.
+      - patterns:""",
+    _url_calls("$ARG"),
+    _right_concat(),
+    """      # format() when the placeholder is not after a prefix that ends the authority.
       - patterns:""",
     _url_calls("$S.format(..., $U, ...)"),
-    """          - metavariable-regex:
+    f"""          - metavariable-regex:
               metavariable: $S
-              regex: ^[rRbBuU]*["']\\{
+              regex: {json.dumps(_UNPINNED_FORMAT)}
           - focus-metavariable: $U""",
 ])
 
@@ -214,7 +337,7 @@ def rule(rid: str, cls: str, message: str, sinks: str) -> str:
             "    options:\n      taint_assume_safe_functions: true\n      taint_assume_safe_indexes: true\n"
             f"    languages: [python]\n    severity: ERROR\n"
             f"    message: {json.dumps(message)}\n    metadata:\n      class: {json.dumps(cls)}\n      catalogue: argus-ci/suite-rules\n"
-            f"{EXCLUDE}\n{sources()}\n{SANITIZERS}\n{sinks}\n")
+            f"{EXCLUDE}\n{sources()}\n{SANITIZERS}\n{PROPAGATORS}\n{sinks}\n")
 
 
 def main() -> None:

@@ -52,11 +52,6 @@ def sample(name: str):
     return FileResponse(RECORDINGS / name)
 
 
-@app.post("/upload")
-def upload(filename: str, data: bytes):
-    (UPLOAD_DIR / Path(filename).name).write_bytes(data)
-
-
 @app.get("/exports/{name}")
 def export_file(name: str):
     from argus_cortex.fs import safe_join as cortex_safe_join

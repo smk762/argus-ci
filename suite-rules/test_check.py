@@ -205,6 +205,47 @@ class Generate(unittest.TestCase):
         self.assertIn("- pattern: $U + $R", sinks)
         self.assertNotIn('pattern-not: $X.$M("..." + $Y, ...)', sinks)
 
+    def test_rejecting_guard_requires_the_check_to_dominate(self):
+        # `<... c ...>` matches an `and` operand and a negated test, so neither can be a guard.
+        self.assertNotIn("<...", _generate.SANITIZERS)
+        guard = _generate._guard(["$X not in $C"], "c")
+        self.assertIn("if $X not in $C:\n", guard)
+        self.assertIn("if $X not in $C or ...:\n", guard)
+        self.assertIn("if ... or $X not in $C:\n", guard)
+        self.assertIn("if ... or $X not in $C or ...:\n", guard)
+
+    def test_request_method_takes_the_url_second(self):
+        sinks = _generate.URL_SINKS
+        for pat in ("requests.request($METHOD, $U, ...)", "httpx.request($METHOD, $U, ...)",
+                    "$C.request($METHOD, $U, ...)"):
+            self.assertIn(pat, sinks, pat)
+        # The first-positional method list must not include request(), or the method string is the sink.
+        self.assertNotIn("|request|", sinks)
+
+    def test_urlopen_keyword_is_a_sink(self):
+        sinks = _generate.URL_SINKS
+        self.assertIn("urllib.request.urlopen(url=$U, ...)", sinks)
+        self.assertIn("\n              - pattern: urlopen(url=$U, ...)\n", sinks)
+
+    def test_unpinned_host_template_stays_a_sink(self):
+        sinks = _generate.URL_SINKS
+        # A constant prefix is a sink-exclusion only when it is scheme, host and a slash.
+        # `BASE + user` is `$L + $U`; an f-string hole in the authority is a pattern-regex.
+        self.assertIn("$L + $U", sinks)
+        self.assertIn('pattern-regex: "://', sinks)
+        self.assertIn("[a-zA-Z][a-zA-Z0-9+.-]*://", sinks)
+
+    def test_basename_and_path_name_are_not_sanitizers(self):
+        san = _generate.SANITIZERS
+        for gone in ("os.path.basename(...)", "Path(...).name", "PurePath(...).name"):
+            self.assertNotIn(f"- pattern: {gone}", san, gone)
+        # Dropping the sanitizer is not enough: taint_assume_safe_functions would still drop the
+        # call. The argument's taint has to reach the result.
+        text = _generate.rule("r", "c", "m", "")
+        self.assertIn("^(.*\\.)?basename$", text)
+        self.assertIn("^(.*\\.)?(Pure)?Path$", text)
+        self.assertIn("by-side-effect: false", text)
+
 
 def _semgrep_available() -> bool:
     import shutil

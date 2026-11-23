@@ -1,0 +1,55 @@
+rules:
+  - id: handrolled-health
+    languages: [python]
+    severity: WARNING
+    message: >-
+      This registers a /health route by hand. Serve it with argus_cortex.service.install_health(app, service=...),
+      which answers the suite's one ServiceHealth body (version, status, wire versions, dependency checks); pass the
+      service's own fields through `extra`. A health body shaped per service is one the directory, scout and the
+      dashboard cannot read.
+    metadata:
+      class: unhandled_error
+      catalogue: argus-ci/suite-rules
+    paths:
+      exclude:
+        - "argus_cortex/"
+        - "tests/"
+        - "test_*.py"
+        - "*_test.py"
+        - "conftest.py"
+    pattern-either:
+      # @app.get("/health"), @router.api_route("/health", ...). Decorators only: client.get("/health") is a caller.
+      - patterns:
+          - pattern-either:
+              - pattern: |
+                  @$APP.$METHOD("/health", ...)
+                  def $F(...):
+                    ...
+              - pattern: |
+                  @$APP.$METHOD("/health", ...)
+                  async def $F(...):
+                    ...
+              - pattern: |
+                  @$APP.$METHOD(path="/health", ...)
+                  def $F(...):
+                    ...
+              - pattern: |
+                  @$APP.$METHOD(path="/health", ...)
+                  async def $F(...):
+                    ...
+          - metavariable-regex:
+              metavariable: $METHOD
+              regex: ^(get|head|route|api_route)$
+      # app.add_api_route("/health", fn), app.add_route("/health", fn)
+      - patterns:
+          - pattern-either:
+              - pattern: $APP.$ADD("/health", ...)
+              - pattern: $APP.$ADD(path="/health", ...)
+          - metavariable-regex:
+              metavariable: $ADD
+              regex: ^(add_route|add_api_route)$
+      # Route tables: Route("/health", endpoint), APIRoute("/health", endpoint)
+      - pattern: Route("/health", ...)
+      - pattern: starlette.routing.Route("/health", ...)
+      - pattern: APIRoute("/health", ...)
+      - pattern: fastapi.routing.APIRoute("/health", ...)

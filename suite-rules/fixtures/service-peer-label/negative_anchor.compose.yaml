@@ -1,0 +1,26 @@
+# The labels live in the anchor both services merge: only one of the two runs, and both are the peer.
+x-doohickey: &doohickey
+  restart: unless-stopped
+  labels:
+    argus.peer: doohickey
+    argus.service: argus-doohickey
+    argus.health: /health
+    argus.port: "8198"
+
+x-listed: &listed
+  labels:
+    - "argus.peer=thingamajig"
+
+services:
+  doohickey:
+    <<: *doohickey
+    image: ghcr.io/smk762/argus-doohickey:latest
+
+  argus-doohickey:
+    <<: *doohickey
+    profiles: ["gpu"]
+    image: ghcr.io/smk762/argus-doohickey:latest-gpu
+
+  thingamajig:
+    <<: *listed
+    build: .

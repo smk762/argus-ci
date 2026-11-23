@@ -174,6 +174,7 @@ rules:
     pattern-sanitizers:
       - pattern: int(...)
       - pattern: float(...)
+      # basename('..') and Path('..').name are '..', so neither confines a path.
       # A validator that raises on a bad value clears it from then on.
       - by-side-effect: true
         patterns:
@@ -251,6 +252,26 @@ rules:
                       return ...
                   ...
               - pattern-inside: |
+                  if ... or not $X.resolve(...).is_relative_to(...) or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or not $X.resolve(...).is_relative_to(...) or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or not $X.resolve(...).is_relative_to(...) or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or not $X.resolve(...).is_relative_to(...) or ...:
+                      ...
+                      return ...
+                  ...
+              - pattern-inside: |
                   if not $X.is_relative_to(...):
                       ...
                       raise ...
@@ -307,6 +328,26 @@ rules:
                   ...
               - pattern-inside: |
                   if ... or not $X.is_relative_to(...):
+                      ...
+                      return ...
+                  ...
+              - pattern-inside: |
+                  if ... or not $X.is_relative_to(...) or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or not $X.is_relative_to(...) or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or not $X.is_relative_to(...) or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or not $X.is_relative_to(...) or ...:
                       ...
                       return ...
                   ...
@@ -371,6 +412,26 @@ rules:
                       return ...
                   ...
               - pattern-inside: |
+                  if ... or $X.resolve(...).parent != $B or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or $X.resolve(...).parent != $B or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $X.resolve(...).parent != $B or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $X.resolve(...).parent != $B or ...:
+                      ...
+                      return ...
+                  ...
+              - pattern-inside: |
                   if $B != $X.resolve(...).parent:
                       ...
                       raise ...
@@ -427,6 +488,26 @@ rules:
                   ...
               - pattern-inside: |
                   if ... or $B != $X.resolve(...).parent:
+                      ...
+                      return ...
+                  ...
+              - pattern-inside: |
+                  if ... or $B != $X.resolve(...).parent or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or $B != $X.resolve(...).parent or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $B != $X.resolve(...).parent or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $B != $X.resolve(...).parent or ...:
                       ...
                       return ...
                   ...
@@ -491,6 +572,26 @@ rules:
                       return ...
                   ...
               - pattern-inside: |
+                  if ... or os.path.commonpath([..., $X, ...]) != $B or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or os.path.commonpath([..., $X, ...]) != $B or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or os.path.commonpath([..., $X, ...]) != $B or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or os.path.commonpath([..., $X, ...]) != $B or ...:
+                      ...
+                      return ...
+                  ...
+              - pattern-inside: |
                   if $B != os.path.commonpath([..., $X, ...]):
                       ...
                       raise ...
@@ -547,6 +648,26 @@ rules:
                   ...
               - pattern-inside: |
                   if ... or $B != os.path.commonpath([..., $X, ...]):
+                      ...
+                      return ...
+                  ...
+              - pattern-inside: |
+                  if ... or $B != os.path.commonpath([..., $X, ...]) or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or $B != os.path.commonpath([..., $X, ...]) or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $B != os.path.commonpath([..., $X, ...]) or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $B != os.path.commonpath([..., $X, ...]) or ...:
                       ...
                       return ...
                   ...
@@ -611,6 +732,26 @@ rules:
                   ...
               - pattern-inside: |
                   if ... or not $F(..., $X, ...):
+                      ...
+                      return ...
+                  ...
+              - pattern-inside: |
+                  if ... or not $F(..., $X, ...) or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or not $F(..., $X, ...) or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or not $F(..., $X, ...) or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or not $F(..., $X, ...) or ...:
                       ...
                       return ...
                   ...
@@ -682,124 +823,170 @@ rules:
                       ...
                       return ...
                   ...
+              - pattern-inside: |
+                  if ... or $X not in $C or ...:
+                      ...
+                      raise ...
+                  ...
+              - pattern-inside: |
+                  if ... or $X not in $C or ...:
+                      ...
+                      abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $X not in $C or ...:
+                      ...
+                      flask.abort(...)
+                  ...
+              - pattern-inside: |
+                  if ... or $X not in $C or ...:
+                      ...
+                      return ...
+                  ...
           - pattern: $X
-      # The body of `if X in ALLOWED:`, but not when that if has an else (semgrep's pattern-inside would cover it).
+      # The body of `if X in ALLOWED`, when that check dominates and the if has no else.
       - patterns:
-          - pattern-inside: |
-              if <... $X in $C ...>:
+          - pattern-either:
+              - pattern-inside: |
+                  if $X in $C:
+                      ...
+              - pattern-inside: |
+                  if $X in $C and ...:
+                      ...
+              - pattern-inside: |
+                  if ... and $X in $C:
+                      ...
+              - pattern-inside: |
+                  if ... and $X in $C and ...:
+                      ...
+          - pattern-not-inside: |
+              if $X in $C:
+                  ...
+              else:
                   ...
           - pattern-not-inside: |
-              if <... $X in $C ...>:
+              if $X in $C and ...:
+                  ...
+              else:
+                  ...
+          - pattern-not-inside: |
+              if ... and $X in $C:
+                  ...
+              else:
+                  ...
+          - pattern-not-inside: |
+              if ... and $X in $C and ...:
                   ...
               else:
                   ...
           - pattern: $X
     pattern-propagators:
-      - patterns:
-          - pattern: $OUT
-          - pattern: os.path.basename($IN)
-        from: $IN
-        to: $OUT
-        by-side-effect: false
-      - patterns:
-          - pattern: $OUT
-          - pattern: Path($IN).name
-        from: $IN
-        to: $OUT
-        by-side-effect: false
-      - patterns:
-          - pattern: $OUT
-          - pattern: PurePath($IN).name
-        from: $IN
-        to: $OUT
-        by-side-effect: false
+      - by-side-effect: false
+        patterns:
+          - pattern: $F($X)
+          - focus-metavariable: $F
+          - metavariable-regex:
+              metavariable: $F
+              regex: ^(.*\.)?basename$
+        from: $X
+        to: $F
+      - by-side-effect: false
+        patterns:
+          - pattern: $F($X).name
+          - focus-metavariable: $F
+          - metavariable-regex:
+              metavariable: $F
+              regex: ^(.*\.)?(Pure)?Path$
+        from: $X
+        to: $F
+
     pattern-sinks:
-      # The URL itself is a sink. A template is not, here: its tainted part is a sink only when
-      # that part can still change the scheme or host (see the branches below).
+      # The URL itself is a sink. A template is too, unless a constant prefix ends the authority
+      # (scheme, host and a slash). `f"https://{host}/x"`, `"http://{}".format(host)` and
+      # `BASE + user` still choose the host; `f"https://api.example.com/{id}"` does not.
       - patterns:
           - pattern-either:
+              - patterns:
+                  - pattern: requests.$M($U, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: requests.$M(url=$U, ...)
+              - patterns:
+                  - pattern: httpx.$M($U, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: httpx.$M(url=$U, ...)
+              - pattern: requests.request($METHOD, $U, ...)
+              - pattern: requests.request($METHOD, url=$U, ...)
+              - pattern: httpx.request($METHOD, $U, ...)
+              - pattern: httpx.request($METHOD, url=$U, ...)
               - pattern: urllib.request.urlopen($U, ...)
               - pattern: urllib.request.urlopen(url=$U, ...)
               - pattern: urlopen($U, ...)
               - pattern: urlopen(url=$U, ...)
-              - pattern: requests.$M(url=$U, ...)
-              - pattern: requests.request($METHOD, $U, ...)
               - patterns:
-                  - pattern: requests.$M($U, ...)
-                  - pattern-not: requests.request($ANY, ...)
-              - pattern: httpx.$M(url=$U, ...)
-              - pattern: httpx.request($METHOD, $U, ...)
-              - patterns:
-                  - pattern: httpx.$M($U, ...)
-                  - pattern-not: httpx.request($ANY, ...)
-              - patterns:
-                  - pattern: $C.$M(url=$U, ...)
+                  - pattern-either:
+                      - pattern: $C.$M($U, ...)
+                      - pattern: $C.$M(url=$U, ...)
                   - metavariable-regex:
                       metavariable: $C
                       regex: (?i).*(client|session|http).*
                   - metavariable-regex:
                       metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
               - patterns:
-                  - pattern: $C.$M($U, ...)
-                  - pattern-not: $C.request($ANY, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.request($METHOD, $U, ...)
+                  - pattern-either:
+                      - pattern: $C.request($METHOD, $U, ...)
+                      - pattern: $C.request($METHOD, url=$U, ...)
                   - metavariable-regex:
                       metavariable: $C
                       regex: (?i).*(client|session|http).*
           - pattern-not: $F(f"...", ...)
           - pattern-not: $F(url=f"...", ...)
-          - pattern-not: $F($M, f"...", ...)
           - pattern-not: $F($A + $B, ...)
           - pattern-not: $F(url=$A + $B, ...)
-          - pattern-not: $F($M, $A + $B, ...)
           - pattern-not: $F($S.format(...), ...)
           - pattern-not: $F(url=$S.format(...), ...)
-          - pattern-not: $F($M, $S.format(...), ...)
           - focus-metavariable: $U
-      # A template whose leading part is the request value (f"{U}/api", U + "/x").
+      # A template whose tainted part leads (f"{U}/api", U + "/x").
       - patterns:
           - pattern-either:
+              - patterns:
+                  - pattern: requests.$M($ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: requests.$M(url=$ARG, ...)
+              - patterns:
+                  - pattern: httpx.$M($ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: httpx.$M(url=$ARG, ...)
+              - pattern: requests.request($METHOD, $ARG, ...)
+              - pattern: requests.request($METHOD, url=$ARG, ...)
+              - pattern: httpx.request($METHOD, $ARG, ...)
+              - pattern: httpx.request($METHOD, url=$ARG, ...)
               - pattern: urllib.request.urlopen($ARG, ...)
               - pattern: urllib.request.urlopen(url=$ARG, ...)
               - pattern: urlopen($ARG, ...)
               - pattern: urlopen(url=$ARG, ...)
-              - pattern: requests.$M(url=$ARG, ...)
-              - pattern: requests.request($METHOD, $ARG, ...)
               - patterns:
-                  - pattern: requests.$M($ARG, ...)
-                  - pattern-not: requests.request($ANY, ...)
-              - pattern: httpx.$M(url=$ARG, ...)
-              - pattern: httpx.request($METHOD, $ARG, ...)
-              - patterns:
-                  - pattern: httpx.$M($ARG, ...)
-                  - pattern-not: httpx.request($ANY, ...)
-              - patterns:
-                  - pattern: $C.$M(url=$ARG, ...)
+                  - pattern-either:
+                      - pattern: $C.$M($ARG, ...)
+                      - pattern: $C.$M(url=$ARG, ...)
                   - metavariable-regex:
                       metavariable: $C
                       regex: (?i).*(client|session|http).*
                   - metavariable-regex:
                       metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
               - patterns:
-                  - pattern: $C.$M($ARG, ...)
-                  - pattern-not: $C.request($ANY, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.request($METHOD, $ARG, ...)
+                  - pattern-either:
+                      - pattern: $C.request($METHOD, $ARG, ...)
+                      - pattern: $C.request($METHOD, url=$ARG, ...)
                   - metavariable-regex:
                       metavariable: $C
                       regex: (?i).*(client|session|http).*
@@ -809,182 +996,150 @@ rules:
                 - pattern: f"{$U}..."
                 - pattern: $U + $R
           - focus-metavariable: $U
-      # format(): a leading placeholder, or one that sits before the authority is closed.
+      # An f-string hole before the authority-ending slash (f"https://{host}/x", f"https://api.{host}/x").
       - patterns:
           - pattern-either:
+              - patterns:
+                  - pattern: requests.$M($ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: requests.$M(url=$ARG, ...)
+              - patterns:
+                  - pattern: httpx.$M($ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: httpx.$M(url=$ARG, ...)
+              - pattern: requests.request($METHOD, $ARG, ...)
+              - pattern: requests.request($METHOD, url=$ARG, ...)
+              - pattern: httpx.request($METHOD, $ARG, ...)
+              - pattern: httpx.request($METHOD, url=$ARG, ...)
+              - pattern: urllib.request.urlopen($ARG, ...)
+              - pattern: urllib.request.urlopen(url=$ARG, ...)
+              - pattern: urlopen($ARG, ...)
+              - pattern: urlopen(url=$ARG, ...)
+              - patterns:
+                  - pattern-either:
+                      - pattern: $C.$M($ARG, ...)
+                      - pattern: $C.$M(url=$ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $C
+                      regex: (?i).*(client|session|http).*
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - patterns:
+                  - pattern-either:
+                      - pattern: $C.request($METHOD, $ARG, ...)
+                      - pattern: $C.request($METHOD, url=$ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $C
+                      regex: (?i).*(client|session|http).*
+          - metavariable-pattern:
+              metavariable: $ARG
+              patterns:
+                - pattern: f"...{$U}..."
+                - pattern-regex: "://[^/\"']*\\{"
+          - focus-metavariable: $U
+      # Appended on the right: a sink unless the left side provably ends the authority.
+      - patterns:
+          - pattern-either:
+              - patterns:
+                  - pattern: requests.$M($ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: requests.$M(url=$ARG, ...)
+              - patterns:
+                  - pattern: httpx.$M($ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: httpx.$M(url=$ARG, ...)
+              - pattern: requests.request($METHOD, $ARG, ...)
+              - pattern: requests.request($METHOD, url=$ARG, ...)
+              - pattern: httpx.request($METHOD, $ARG, ...)
+              - pattern: httpx.request($METHOD, url=$ARG, ...)
+              - pattern: urllib.request.urlopen($ARG, ...)
+              - pattern: urllib.request.urlopen(url=$ARG, ...)
+              - pattern: urlopen($ARG, ...)
+              - pattern: urlopen(url=$ARG, ...)
+              - patterns:
+                  - pattern-either:
+                      - pattern: $C.$M($ARG, ...)
+                      - pattern: $C.$M(url=$ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $C
+                      regex: (?i).*(client|session|http).*
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - patterns:
+                  - pattern-either:
+                      - pattern: $C.request($METHOD, $ARG, ...)
+                      - pattern: $C.request($METHOD, url=$ARG, ...)
+                  - metavariable-regex:
+                      metavariable: $C
+                      regex: (?i).*(client|session|http).*
+          - metavariable-pattern:
+              metavariable: $ARG
+              patterns:
+                - pattern: $L + $U
+                - pattern-not:
+                    patterns:
+                      - pattern: $L + $U
+                      - metavariable-regex:
+                          metavariable: $L
+                          regex: "^[rRbBuU]*[\"'][a-zA-Z][a-zA-Z0-9+.-]*://[^/\"'{]+/"
+                - pattern-not:
+                    patterns:
+                      - pattern: ($A + $S) + $U
+                      - metavariable-regex:
+                          metavariable: $S
+                          regex: "^[rRbBuU]*[\"']/"
+          - focus-metavariable: $U
+      # format() when the placeholder is not after a prefix that ends the authority.
+      - patterns:
+          - pattern-either:
+              - patterns:
+                  - pattern: requests.$M($S.format(..., $U, ...), ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: requests.$M(url=$S.format(..., $U, ...), ...)
+              - patterns:
+                  - pattern: httpx.$M($S.format(..., $U, ...), ...)
+                  - metavariable-regex:
+                      metavariable: $M
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
+              - pattern: httpx.$M(url=$S.format(..., $U, ...), ...)
+              - pattern: requests.request($METHOD, $S.format(..., $U, ...), ...)
+              - pattern: requests.request($METHOD, url=$S.format(..., $U, ...), ...)
+              - pattern: httpx.request($METHOD, $S.format(..., $U, ...), ...)
+              - pattern: httpx.request($METHOD, url=$S.format(..., $U, ...), ...)
               - pattern: urllib.request.urlopen($S.format(..., $U, ...), ...)
               - pattern: urllib.request.urlopen(url=$S.format(..., $U, ...), ...)
               - pattern: urlopen($S.format(..., $U, ...), ...)
               - pattern: urlopen(url=$S.format(..., $U, ...), ...)
-              - pattern: requests.$M(url=$S.format(..., $U, ...), ...)
-              - pattern: requests.request($METHOD, $S.format(..., $U, ...), ...)
               - patterns:
-                  - pattern: requests.$M($S.format(..., $U, ...), ...)
-                  - pattern-not: requests.request($ANY, ...)
-              - pattern: httpx.$M(url=$S.format(..., $U, ...), ...)
-              - pattern: httpx.request($METHOD, $S.format(..., $U, ...), ...)
-              - patterns:
-                  - pattern: httpx.$M($S.format(..., $U, ...), ...)
-                  - pattern-not: httpx.request($ANY, ...)
-              - patterns:
-                  - pattern: $C.$M(url=$S.format(..., $U, ...), ...)
+                  - pattern-either:
+                      - pattern: $C.$M($S.format(..., $U, ...), ...)
+                      - pattern: $C.$M(url=$S.format(..., $U, ...), ...)
                   - metavariable-regex:
                       metavariable: $C
                       regex: (?i).*(client|session|http).*
                   - metavariable-regex:
                       metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
+                      regex: ^(get|post|put|patch|delete|head|options|stream)$
               - patterns:
-                  - pattern: $C.$M($S.format(..., $U, ...), ...)
-                  - pattern-not: $C.request($ANY, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.request($METHOD, $S.format(..., $U, ...), ...)
+                  - pattern-either:
+                      - pattern: $C.request($METHOD, $S.format(..., $U, ...), ...)
+                      - pattern: $C.request($METHOD, url=$S.format(..., $U, ...), ...)
                   - metavariable-regex:
                       metavariable: $C
                       regex: (?i).*(client|session|http).*
           - metavariable-regex:
               metavariable: $S
-              regex: ^[rRbBuU]*["'](\{|[a-zA-Z][a-zA-Z0-9+.-]*://[^/{}"']*\{)
+              regex: "^[rRbBuU]*[\"'](\\{|[a-zA-Z][a-zA-Z0-9+.-]*://[^/\"'{]*\\{)"
           - focus-metavariable: $U
-      # f"https://{host}/..." : the interpolation is still inside the authority.
-      - patterns:
-          - pattern-either:
-              - pattern: urllib.request.urlopen($ARG, ...)
-              - pattern: urllib.request.urlopen(url=$ARG, ...)
-              - pattern: urlopen($ARG, ...)
-              - pattern: urlopen(url=$ARG, ...)
-              - pattern: requests.$M(url=$ARG, ...)
-              - pattern: requests.request($METHOD, $ARG, ...)
-              - patterns:
-                  - pattern: requests.$M($ARG, ...)
-                  - pattern-not: requests.request($ANY, ...)
-              - pattern: httpx.$M(url=$ARG, ...)
-              - pattern: httpx.request($METHOD, $ARG, ...)
-              - patterns:
-                  - pattern: httpx.$M($ARG, ...)
-                  - pattern-not: httpx.request($ANY, ...)
-              - patterns:
-                  - pattern: $C.$M(url=$ARG, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.$M($ARG, ...)
-                  - pattern-not: $C.request($ANY, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.request($METHOD, $ARG, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-          - metavariable-regex:
-              metavariable: $ARG
-              regex: ^[fF]["'][a-zA-Z][a-zA-Z0-9+.-]*://[^/{}"']*\{
-          - focus-metavariable: $ARG
-      # "https://api.internal" + x, or BASE + x. A literal pins the host only with a slash after it.
-      - patterns:
-          - pattern-either:
-              - pattern: urllib.request.urlopen($ARG, ...)
-              - pattern: urllib.request.urlopen(url=$ARG, ...)
-              - pattern: urlopen($ARG, ...)
-              - pattern: urlopen(url=$ARG, ...)
-              - pattern: requests.$M(url=$ARG, ...)
-              - pattern: requests.request($METHOD, $ARG, ...)
-              - patterns:
-                  - pattern: requests.$M($ARG, ...)
-                  - pattern-not: requests.request($ANY, ...)
-              - pattern: httpx.$M(url=$ARG, ...)
-              - pattern: httpx.request($METHOD, $ARG, ...)
-              - patterns:
-                  - pattern: httpx.$M($ARG, ...)
-                  - pattern-not: httpx.request($ANY, ...)
-              - patterns:
-                  - pattern: $C.$M(url=$ARG, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.$M($ARG, ...)
-                  - pattern-not: $C.request($ANY, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.request($METHOD, $ARG, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-          - metavariable-pattern:
-              metavariable: $ARG
-              patterns:
-                - pattern: $L + $R
-                - metavariable-regex:
-                    metavariable: $L
-                    regex: ^["'][a-zA-Z][a-zA-Z0-9+.-]*://[^/{}"']*["']$
-          - focus-metavariable: $R
-      - patterns:
-          - pattern-either:
-              - pattern: urllib.request.urlopen($ARG, ...)
-              - pattern: urllib.request.urlopen(url=$ARG, ...)
-              - pattern: urlopen($ARG, ...)
-              - pattern: urlopen(url=$ARG, ...)
-              - pattern: requests.$M(url=$ARG, ...)
-              - pattern: requests.request($METHOD, $ARG, ...)
-              - patterns:
-                  - pattern: requests.$M($ARG, ...)
-                  - pattern-not: requests.request($ANY, ...)
-              - pattern: httpx.$M(url=$ARG, ...)
-              - pattern: httpx.request($METHOD, $ARG, ...)
-              - patterns:
-                  - pattern: httpx.$M($ARG, ...)
-                  - pattern-not: httpx.request($ANY, ...)
-              - patterns:
-                  - pattern: $C.$M(url=$ARG, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.$M($ARG, ...)
-                  - pattern-not: $C.request($ANY, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-                  - metavariable-regex:
-                      metavariable: $M
-                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$
-              - patterns:
-                  - pattern: $C.request($METHOD, $ARG, ...)
-                  - metavariable-regex:
-                      metavariable: $C
-                      regex: (?i).*(client|session|http).*
-          - metavariable-pattern:
-              metavariable: $ARG
-              patterns:
-                - pattern: $NAME + $R
-                - metavariable-regex:
-                    metavariable: $NAME
-                    regex: ^[A-Za-z_][A-Za-z0-9_]*$
-          - focus-metavariable: $R

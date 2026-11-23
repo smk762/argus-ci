@@ -205,6 +205,49 @@ class Generate(unittest.TestCase):
         self.assertIn("- pattern: $U + $R", sinks)
         self.assertNotIn('pattern-not: $X.$M("..." + $Y, ...)', sinks)
 
+    def test_rejecting_guard_dominates(self):
+        # `if flag and bad(x)` and `if not bad(x)` must not match the rejecting-guard sanitizer.
+        san = _generate.SANITIZERS
+        self.assertNotIn("if <... not $X.resolve(...).is_relative_to(...) ...>:", san)
+        self.assertNotIn("if <... $X not in $C ...>:", san)
+        self.assertIn("if not $X.resolve(...).is_relative_to(...):", san)
+        self.assertIn("if not $X.resolve(...).is_relative_to(...) or ...:", san)
+        self.assertIn("if ... or not $X.resolve(...).is_relative_to(...):", san)
+        self.assertIn("if $X not in $C:", san)
+
+    def test_request_url_is_the_second_positional(self):
+        calls = _generate._url_calls("$U")
+        for pattern in ("requests.request($METHOD, $U, ...)", "httpx.request($METHOD, $U, ...)",
+                        "$C.request($METHOD, $U, ...)"):
+            self.assertIn(pattern, calls, pattern)
+        self.assertIn("pattern-not: requests.request($ANY, ...)", calls)
+        self.assertIn("pattern-not: httpx.request($ANY, ...)", calls)
+        self.assertIn("pattern-not: $C.request($ANY, ...)", calls)
+
+    def test_urlopen_accepts_the_url_keyword(self):
+        calls = _generate._url_calls("$U")
+        self.assertIn("urllib.request.urlopen(url=$U, ...)", calls)
+        self.assertIn("urlopen(url=$U, ...)", calls)
+        self.assertIn("requests.$M(url=$U, ...)", calls)
+
+    def test_unpinned_url_prefix_stays_a_sink(self):
+        sinks = _generate.URL_SINKS
+        self.assertIn(_generate._FSTRING_IN_AUTHORITY, sinks)
+        self.assertIn(_generate._FORMAT_SINK, sinks)
+        self.assertIn(_generate._LITERAL_OPEN_AUTHORITY, sinks)
+        self.assertIn("- pattern: $NAME + $R", sinks)
+        # Open authority: scheme://host then the closing quote, with no slash between them.
+        self.assertIn("://[^/{}\"']*[\"']$", _generate._LITERAL_OPEN_AUTHORITY)
+        self.assertIn("://[^/{}\"']*\\{", _generate._FSTRING_IN_AUTHORITY)
+        self.assertIn("://[^/{}\"']*\\{", _generate._FORMAT_SINK)
+
+    def test_basename_and_path_name_keep_taint(self):
+        text = _generate.rule("r", "path_traversal", "m", _generate.PATH_SINKS)
+        for gone in ("pattern: os.path.basename(...)", "pattern: Path(...).name", "pattern: PurePath(...).name"):
+            self.assertNotIn(gone, text, gone)
+        for kept in ("os.path.basename($IN)", "Path($IN).name", "PurePath($IN).name", "by-side-effect: false"):
+            self.assertIn(kept, text, kept)
+
 
 def _semgrep_available() -> bool:
     import shutil

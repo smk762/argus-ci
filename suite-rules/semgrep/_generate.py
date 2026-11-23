@@ -66,13 +66,23 @@ REJECTS = ("raise ...", "abort(...)", "flask.abort(...)", "return ...")  # `retu
 
 
 def _guard(conds: list[str], comment: str, where: str = "") -> str:
-    """A sanitizer for $X after `if <one of conds>: <reject>`. `<... c ...>` lets the test sit in an and/or chain
-    (semgrep doesn't carry side effects out of a short-circuit chain)."""
+    """A sanitizer for $X after a rejecting if, only when the check dominates that reject.
+
+    Fall-through means the test was false, so `if c`, `if c or ...` and `if ... or c` all
+    imply c is false. `if c and ...` does not (the other operand can skip the reject), and a
+    deep `<... c ...>` also matches `not c`. A negated check is its own entry in `conds`.
+    """
     out = [f"      # {comment}", "      - patterns:", "          - pattern-either:"]
+    forms = ("if {c}:", "if {c} or ...:", "if ... or {c}:")
     for c in conds:
-        for rej in REJECTS:
-            out.append(f"              - pattern-inside: |\n                  if <... {c} ...>:\n"
-                       f"                      ...\n                      {rej}\n                  ...")
+        for form in forms:
+            test = form.format(c=c)
+            for rej in REJECTS:
+                out.append("              - pattern-inside: |\n"
+                           f"                  {test}\n"
+                           "                      ...\n"
+                           f"                      {rej}\n"
+                           "                  ...")
     return "\n".join(out) + where + "\n          - pattern: $X"
 
 
@@ -85,9 +95,6 @@ SANITIZERS = "\n".join([
     """    pattern-sanitizers:
       - pattern: int(...)
       - pattern: float(...)
-      - pattern: os.path.basename(...)
-      - pattern: Path(...).name
-      - pattern: PurePath(...).name
       # A validator that raises on a bad value clears it from then on.
       - by-side-effect: true
         patterns:
@@ -147,39 +154,80 @@ PATH_SINKS = """    pattern-sinks:
           - focus-metavariable: $P"""
 
 
+# request(method, url, ...) and Client/Session/http.request: the URL is the second positional.
+# Every other call here takes it first, or by the url= keyword (including urlopen).
+_RECEIVER = r"(?i).*(client|session|http).*"
+_HTTP_METHOD = r"^(get|post|put|patch|delete|head|options|request|stream)$"
+
+
 def _url_calls(arg: str) -> str:
-    """`- pattern-either:` over the outbound calls, with `arg` as the URL argument (positional or url=)."""
+    """`- pattern-either:` over the outbound calls, with `arg` as the URL argument."""
     out = ["          - pattern-either:"]
-    for call in ("requests.$M", "httpx.$M", "urllib.request.urlopen", "urlopen"):
+    for call in ("urllib.request.urlopen", "urlopen"):
         out.append(f"              - pattern: {call}({arg}, ...)")
-        if call.endswith("$M"):
-            out.append(f"              - pattern: {call}(url={arg}, ...)")
+        out.append(f"              - pattern: {call}(url={arg}, ...)")
+    for mod in ("requests", "httpx"):
+        out.append(f"              - pattern: {mod}.$M(url={arg}, ...)")
+        out.append(f"              - pattern: {mod}.request($METHOD, {arg}, ...)")
+        # First positional is the URL for get/post/..., but not for request(method, url).
+        out.append("              - patterns:")
+        out.append(f"                  - pattern: {mod}.$M({arg}, ...)")
+        out.append(f"                  - pattern-not: {mod}.request($ANY, ...)")
     out += [
         "              - patterns:",
-        "                  - pattern-either:",
-        f"                      - pattern: $C.$M({arg}, ...)",
-        f"                      - pattern: $C.$M(url={arg}, ...)",
+        f"                  - pattern: $C.$M(url={arg}, ...)",
         "                  - metavariable-regex:",
         "                      metavariable: $C",
-        "                      regex: (?i).*(client|session|http).*",
+        f"                      regex: {_RECEIVER}",
         "                  - metavariable-regex:",
         "                      metavariable: $M",
-        "                      regex: ^(get|post|put|patch|delete|head|options|request|stream)$",
+        f"                      regex: {_HTTP_METHOD}",
+        "              - patterns:",
+        f"                  - pattern: $C.$M({arg}, ...)",
+        "                  - pattern-not: $C.request($ANY, ...)",
+        "                  - metavariable-regex:",
+        "                      metavariable: $C",
+        f"                      regex: {_RECEIVER}",
+        "                  - metavariable-regex:",
+        "                      metavariable: $M",
+        f"                      regex: {_HTTP_METHOD}",
+        "              - patterns:",
+        f"                  - pattern: $C.request($METHOD, {arg}, ...)",
+        "                  - metavariable-regex:",
+        "                      metavariable: $C",
+        f"                      regex: {_RECEIVER}",
     ]
     return "\n".join(out)
 
 
 TEMPLATES = ('f"..."', "$A + $B", "$S.format(...)")
 
+# A constant prefix pins the host only when it is scheme://host/ (the authority is closed).
+# f"https://{host}/x", "http://{}/x".format(host) and "https://api.internal" + x do not.
+_FSTRING_IN_AUTHORITY = r"""^[fF]["'][a-zA-Z][a-zA-Z0-9+.-]*://[^/{}"']*\{"""
+_FORMAT_SINK = r"""^[rRbBuU]*["'](\{|[a-zA-Z][a-zA-Z0-9+.-]*://[^/{}"']*\{)"""
+_LITERAL_OPEN_AUTHORITY = r"""^["'][a-zA-Z][a-zA-Z0-9+.-]*://[^/{}"']*["']$"""
+_BARE_NAME = r"^[A-Za-z_][A-Za-z0-9_]*$"
+
+
+def _template_nots() -> list[str]:
+    """Drop templates from the direct-URL sink, including request(method, template)."""
+    lines = []
+    for t in TEMPLATES:
+        for expr in (t, f"url={t}", f"$M, {t}"):
+            lines.append(f"          - pattern-not: $F({expr}, ...)")
+    return lines
+
+
 URL_SINKS = "\n".join([
     """    pattern-sinks:
-      # Only what decides the scheme and host is a sink: the URL itself, or the leading part of a template.
-      # A request value after a constant prefix (f"https://api/{x}", BASE + x) can't move the host.
+      # The URL itself is a sink. A template is not, here: its tainted part is a sink only when
+      # that part can still change the scheme or host (see the branches below).
       - patterns:""",
     _url_calls("$U"),
-    *(f"          - pattern-not: $F({kw}{t}, ...)" for t in TEMPLATES for kw in ("", "url=")),
+    *_template_nots(),
     """          - focus-metavariable: $U
-      # A template: the sink is its leading part (f"{U}/api", U + "/x").
+      # A template whose leading part is the request value (f"{U}/api", U + "/x").
       - patterns:""",
     _url_calls("$ARG"),
     """          - metavariable-pattern:
@@ -188,13 +236,65 @@ URL_SINKS = "\n".join([
                 - pattern: f"{$U}..."
                 - pattern: $U + $R
           - focus-metavariable: $U
-      # "{}/x".format(u): the placeholder leads, so every format argument is a sink.
+      # format(): a leading placeholder, or one that sits before the authority is closed.
       - patterns:""",
     _url_calls("$S.format(..., $U, ...)"),
-    """          - metavariable-regex:
+    f"""          - metavariable-regex:
               metavariable: $S
-              regex: ^[rRbBuU]*["']\\{
-          - focus-metavariable: $U""",
+              regex: {_FORMAT_SINK}
+          - focus-metavariable: $U
+      # f"https://{{host}}/..." : the interpolation is still inside the authority.
+      - patterns:""",
+    _url_calls("$ARG"),
+    f"""          - metavariable-regex:
+              metavariable: $ARG
+              regex: {_FSTRING_IN_AUTHORITY}
+          - focus-metavariable: $ARG
+      # "https://api.internal" + x, or BASE + x. A literal pins the host only with a slash after it.
+      - patterns:""",
+    _url_calls("$ARG"),
+    f"""          - metavariable-pattern:
+              metavariable: $ARG
+              patterns:
+                - pattern: $L + $R
+                - metavariable-regex:
+                    metavariable: $L
+                    regex: {_LITERAL_OPEN_AUTHORITY}
+          - focus-metavariable: $R
+      - patterns:""",
+    _url_calls("$ARG"),
+    f"""          - metavariable-pattern:
+              metavariable: $ARG
+              patterns:
+                - pattern: $NAME + $R
+                - metavariable-regex:
+                    metavariable: $NAME
+                    regex: {_BARE_NAME}
+          - focus-metavariable: $R""",
+])
+
+# os.path.basename('..') and Path('..').name are '..'. With taint_assume_safe_functions they would
+# otherwise drop the taint. The output stays tainted; a real guard on the input still clears it.
+PROPAGATORS = "\n".join([
+    """    pattern-propagators:
+      - patterns:
+          - pattern: $OUT
+          - pattern: os.path.basename($IN)
+        from: $IN
+        to: $OUT
+        by-side-effect: false
+      - patterns:
+          - pattern: $OUT
+          - pattern: Path($IN).name
+        from: $IN
+        to: $OUT
+        by-side-effect: false
+      - patterns:
+          - pattern: $OUT
+          - pattern: PurePath($IN).name
+        from: $IN
+        to: $OUT
+        by-side-effect: false""",
 ])
 
 EXCLUDE = """    paths:
@@ -214,7 +314,7 @@ def rule(rid: str, cls: str, message: str, sinks: str) -> str:
             "    options:\n      taint_assume_safe_functions: true\n      taint_assume_safe_indexes: true\n"
             f"    languages: [python]\n    severity: ERROR\n"
             f"    message: {json.dumps(message)}\n    metadata:\n      class: {json.dumps(cls)}\n      catalogue: argus-ci/suite-rules\n"
-            f"{EXCLUDE}\n{sources()}\n{SANITIZERS}\n{sinks}\n")
+            f"{EXCLUDE}\n{sources()}\n{SANITIZERS}\n{PROPAGATORS}\n{sinks}\n")
 
 
 def main() -> None:

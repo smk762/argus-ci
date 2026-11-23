@@ -52,9 +52,13 @@ def sample(name: str):
     return FileResponse(RECORDINGS / name)
 
 
-@app.post("/upload")
-def upload(filename: str, data: bytes):
-    (UPLOAD_DIR / Path(filename).name).write_bytes(data)
+@app.get("/ids/{name}")
+def by_id(name: str):
+    # An allow-list rejects before Path.name is used. `.name` alone is not a sanitizer:
+    # Path("..").name is "..".
+    if name not in ALLOWED:
+        raise HTTPException(404)
+    return FileResponse(RECORDINGS / Path(name).name)
 
 
 @app.get("/exports/{name}")

@@ -44,6 +44,44 @@ class Baseline(unittest.TestCase):
         mine = Counter({hit(path="app/routes.py").key: 1})  # renamed file, same hit
         self.assertEqual(check.compare([hit(path="app/routes.py")], mine, base)["grew"], [])
 
+    def test_a_rule_new_to_the_base_baseline_may_enter_once(self):
+        mine = Counter({hit(rule="new-rule").key: 3, hit().key: 1})
+        base = Counter({hit().key: 1})
+        # The base baseline was written before new-rule existed: its hits may be baselined.
+        self.assertEqual(check.compare([], mine, base, frozenset({"r"}))["grew"], [])
+        # Once the base baseline knows the rule, it only shrinks.
+        self.assertEqual(check.compare([], mine, base, frozenset({"r", "new-rule"}))["grew"], ["new-rule"])
+        # A rule the base knows still can't grow alongside a new one.
+        grown = Counter({hit(rule="new-rule").key: 3, hit().key: 2})
+        self.assertEqual(check.compare([], grown, base, frozenset({"r"}))["grew"], ["r"])
+
+    def test_a_baseline_records_its_rules_and_an_old_one_knows_the_old_catalogue(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "b.json"
+            check.write_baseline(p, [hit()], {"ruff": "1"}, ["r", "q"])
+            self.assertEqual(check.baseline_rules(p), frozenset({"r", "q"}))
+            p.write_text(json.dumps({"version": 1, "tools": {}, "entries": []}))  # written before rules were recorded
+            old = check.baseline_rules(p)
+            self.assertIn("missing-timeout", old)
+            self.assertNotIn("service-peer-label", old)
+            self.assertNotIn("handrolled-health", old)
+            self.assertIsNone(check.baseline_rules(Path(d) / "missing.json"))
+
+    def test_check_lets_a_new_rule_into_the_baseline_and_then_ratchets_it(self):
+        entry = {"rule": "service-peer-label", "path": "compose.yaml", "text": "db:", "count": 1}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "repo"
+            root.mkdir()
+            (root / check.BASELINE).write_text(json.dumps({"version": 1, "tools": {}, "entries": [entry]}))
+            old_base, new_base = Path(d) / "old.json", Path(d) / "new.json"
+            old_base.write_text(json.dumps({"version": 1, "tools": {}, "entries": []}))
+            new_base.write_text(json.dumps({"version": 1, "tools": {}, "rules": ["service-peer-label"], "entries": []}))
+            out = io.StringIO()
+            with mock.patch.object(check, "scan", lambda *a, **kw: []), redirect_stdout(out):
+                self.assertEqual(check.main(["check", "--root", str(root), "--base-baseline", str(old_base)]), 0)
+                self.assertEqual(check.main(["check", "--root", str(root), "--base-baseline", str(new_base)]), 1)
+            self.assertIn("service-peer-label", out.getvalue())
+
     def test_baseline_round_trip(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "b.json"
@@ -261,6 +299,104 @@ class TaintFixtures(unittest.TestCase):
         self.assertEqual(len(rules), 2)
         for res in check.fixtures(rules):
             self.assertTrue(res["ok"], f"{res['rule']}: {res['note']}")
+
+
+LABELLED = """services:
+  argus-widget:
+    build: .
+    ports: ["8199:8199"]
+    labels:
+      argus.peer: widget
+      argus.service: argus-widget
+      argus.health: /health
+      argus.port: "8199"
+"""
+INSTALLED = """from argus_cortex.service import install_health
+from fastapi import FastAPI
+
+app = FastAPI()
+install_health(app, service="argus-widget")
+"""
+
+
+@unittest.skipUnless(_semgrep_available(), "needs semgrep ($SEMGREP or on PATH); CI sets $SEMGREP")
+class ServiceDirectory(unittest.TestCase):
+    """service-peer-label and handrolled-health against small repos (argus-cortex#212)."""
+
+    def hits(self, files: dict[str, str]) -> list[tuple[str, str, str]]:
+        rules = [r for r in check.load_rules()[0] if r.id in (check.PEER_LABEL, "handrolled-health")]
+        self.assertEqual(len(rules), 2)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for rel, text in files.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(text)
+            return [(h.rule, h.path, h.text) for h in check.scan(root, rules=rules)]
+
+    def test_a_labelled_service_with_install_health_passes(self):
+        self.assertEqual(self.hits({"compose.yaml": LABELLED, "src/argus_widget/server.py": INSTALLED}), [])
+
+    def test_a_repo_with_no_compose_file_has_nothing_to_label(self):
+        self.assertEqual(self.hits({"src/argus_widget/server.py": INSTALLED}), [])
+
+    def test_an_unlabelled_service_container_fails(self):
+        compose = LABELLED.replace("      argus.peer: widget\n", "")
+        self.assertEqual(self.hits({"docker-compose.yaml": compose}),
+                         [(check.PEER_LABEL, "docker-compose.yaml", "argus-widget:")])
+
+    def test_an_allowlisted_container_passes_and_a_plain_comment_does_not(self):
+        compose = LABELLED + (
+            "  postgres:  # nosemgrep: service-peer-label  third-party image\n"
+            "    image: postgres:17\n"
+            "  trainer:  # nosemgrep: service-peer-label  one-shot trainer, serves nothing\n"
+            "    build: .\n"
+            "    profiles: [train]\n"
+            "  ollama:  # third-party\n"
+            "    image: ollama/ollama:0.12.0\n")
+        self.assertEqual(self.hits({"compose.yaml": compose}),
+                         [(check.PEER_LABEL, "compose.yaml", "ollama: # third-party")])
+
+    def test_a_baselined_container_passes_check(self):
+        compose = LABELLED + "  kubo:\n    image: ipfs/kubo:v0.43.1\n"
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "compose.yaml").write_text(compose)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(check.main(["check", "--root", d]), 1)
+                self.assertEqual(check.main(["baseline", "--root", d]), 0)
+                self.assertEqual(check.main(["check", "--root", d]), 0)
+            written = json.loads((Path(d) / check.BASELINE).read_text())
+            self.assertEqual([e["text"] for e in written["entries"]], ["kubo:"])
+            self.assertIn(check.PEER_LABEL, written["rules"])
+
+    def test_an_overlay_entry_is_the_service_its_base_file_labels(self):
+        overlay = "services:\n  argus-widget:\n    build:\n      context: ../argus-widget\n"
+        self.assertEqual(self.hits({"compose.yaml": LABELLED, "compose.build.yaml": overlay}), [])
+        # Without a labelled base beside it, or with the base in another directory, it is an unlabelled service.
+        want = [(check.PEER_LABEL, "compose.build.yaml", "argus-widget:")]
+        self.assertEqual(self.hits({"compose.build.yaml": overlay}), want)
+        self.assertEqual(self.hits({"stack/compose.yaml": LABELLED, "compose.build.yaml": overlay}), want)
+
+    def test_other_yaml_with_a_services_key_is_not_a_compose_file(self):
+        workflow = "jobs:\n  test:\n    services:\n      postgres:\n        image: postgres:17\n"
+        self.assertEqual(self.hits({".github/workflows/ci.yml": workflow, "config.yaml": LABELLED.replace(
+            "      argus.peer: widget\n", "")}), [])
+
+    def test_a_hand_rolled_health_route_fails(self):
+        app = ("from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"
+               '@app.get("/health")\ndef health():\n    return {"status": "ok"}\n')
+        self.assertEqual(self.hits({"src/argus_widget/server.py": app}),
+                         [("handrolled-health", "src/argus_widget/server.py", '@app.get("/health")')])
+
+    def test_install_health_behind_an_asgi_guard_passes(self):
+        # argus-echo's shape: a guard in front of the app answers its own 503 body; install_health serves the route.
+        guard = INSTALLED + (
+            "\n\nclass Guard:\n"
+            "    def __init__(self, inner):\n        self.inner = inner\n\n"
+            "    async def __call__(self, scope, receive, send):\n"
+            '        if scope["type"] == "http" and scope["method"] == "GET" and scope["path"] == "/health":\n'
+            "            pass\n"
+            "        await self.inner(scope, receive, send)\n")
+        self.assertEqual(self.hits({"engines/widget/server.py": guard}), [])
 
 
 if __name__ == "__main__":

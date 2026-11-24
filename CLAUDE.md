@@ -30,7 +30,7 @@ Each row names what enforces it. An **UNENFORCED** row is a known gap: when one 
 | A workflow with no top-level `permissions:`, or a `pull_request_target` trigger | `scripts/check_workflows.py` (hygiene) |
 | A workflow that fails syntax, expression or shellcheck checks | `self-check.yml` → actionlint |
 | A suite rule without a positive and a negative fixture, or one that fires on its negative | `suite-rules-self-test.yml` (`check.py fixtures`, `test_check.py`) |
-| A consumer's suite-rules baseline that grows | `check.py check --base-baseline` (`test_check.py::test_ratchet_rejects_a_growing_baseline`) |
+| A consumer's suite-rules baseline that grows, except with the hits of a rule new to it | `check.py check --base-baseline` (`test_check.py::test_ratchet_rejects_a_growing_baseline`, `::test_a_rule_new_to_the_base_baseline_may_enter_once`) |
 | Stale generated semgrep rules | `suite-rules-self-test.yml` (`_generate.py` + `git diff --exit-code`) |
 | A consumer's CLAUDE.md without the argus-suite block, or a repo with no SUITE.md row | `suite-check.yml` |
 | The "Not checked out?" link pointing at `blob/main` | `suite-check.yml`, as a **warning** until the fleet is fixed. Then make it an error |
@@ -60,6 +60,14 @@ Each row names what enforces it. An **UNENFORCED** row is a known gap: when one 
   that rule's hits to its model classifier instead. `kind = "convention"` rules enforce a code shape and are not counted as findings.
 - **A repo opts in** with `suite-rules.yml`. Existing hits go in its `.suite-rules-baseline.json`, which may only
   shrink. Silence one hit with a reasoned `# noqa: <code>` or `# nosemgrep: <id>` on that line.
+- **A new rule's hits may enter a baseline once.** A baseline records the rules it was written with
+  (`rules`), and the ratchet skips a rule the base branch's baseline doesn't list. A baseline with no list knows
+  `RULES_BEFORE_RECORDING` in `check.py`: never add a rule to that set.
+- **Rules are not scoped per repo.** Every rule runs wherever the workflow is called. A rule that only applies to
+  some containers or files (`service-peer-label`) says so in its pattern, and a repo exempts the rest in its own
+  files, with a reasoned `nosemgrep` or its baseline.
+- **`service-peer-label` has a helper rule**, `service-peer-labelled`, in the same semgrep file. `check.py` uses it
+  to pass an overlay file's entry for a service that a compose file beside it labels, and never reports it.
 - **The tool pins** (ruff, semgrep) live in the catalogue's `[tools]`. CI and the auditor both read them from there.
 - **Before adding or widening a rule**, run it over every repo's `origin/dev`, and record the false positives in the PR.
 

@@ -1,0 +1,12 @@
+# No labels at all, and a list of labels without argus.peer.
+services:
+  widget:
+    image: ghcr.io/smk762/argus-widget:${WIDGET_TAG:-latest}
+    ports:
+      - "8199:8199"
+
+  gadget:
+    image: ghcr.io/smk762/argus-gadget:latest
+    labels:
+      - "argus.service=argus-gadget"
+      - "com.example.team=suite"

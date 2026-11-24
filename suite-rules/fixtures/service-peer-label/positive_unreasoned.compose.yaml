@@ -1,0 +1,5 @@
+# A comment that is not the allowlist marker exempts nothing.
+services:
+  widget-cli:  # one-shot CLI
+    build: .
+    profiles: [cli]

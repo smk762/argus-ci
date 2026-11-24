@@ -1,0 +1,12 @@
+# The image comes from a merged anchor; the service still needs its own argus.peer.
+x-widget: &widget
+  image: ${WIDGET_IMAGE:-argus-widget:local}
+  build:
+    context: .
+
+services:
+  serve:
+    <<: *widget
+    command: [argus-widget, serve, --port, "8199"]
+    ports:
+      - 127.0.0.1:8199:8199

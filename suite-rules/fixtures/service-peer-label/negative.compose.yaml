@@ -1,0 +1,39 @@
+# Labelled services pass; containers that are not peers say so on their own line.
+x-widget: &widget
+  image: ${WIDGET_IMAGE:-argus-widget:local}
+  build:
+    context: .
+
+services:
+  argus-widget:
+    <<: *widget
+    ports:
+      - "${WIDGET_PORT:-8199}:8199"
+    labels:
+      argus.peer: widget
+      argus.service: argus-widget
+      argus.health: /health
+      argus.port: "8199"
+
+  gadget:
+    image: ghcr.io/smk762/argus-gadget:latest
+    labels:
+      - "com.example.team=suite"
+      - "argus.peer=gadget"
+
+  widget-cli:  # nosemgrep: service-peer-label  one-shot CLI (`compose run --rm`), serves nothing
+    <<: *widget
+    profiles: [cli]
+
+  postgres:  # nosemgrep: service-peer-label  third-party image
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg
+
+  ollama:  # nosemgrep: service-peer-label  third-party image
+    image: ollama/ollama:0.12.0
+    labels:
+      com.example.role: model-server
+
+volumes:
+  pg-data:

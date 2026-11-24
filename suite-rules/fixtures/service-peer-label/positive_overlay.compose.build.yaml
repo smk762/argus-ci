@@ -1,0 +1,5 @@
+# An overlay that adds a service no file beside it labels (the positive fixtures have no labelled `sprocket`).
+services:
+  sprocket:
+    build:
+      context: ../argus-sprocket

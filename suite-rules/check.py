@@ -15,7 +15,11 @@ moving around doesn't turn old hits into new ones. The baseline counts hits per 
 ``check`` fails when a key appears more often than the baseline allows (a new violation), and,
 given the base branch's baseline, when the baseline itself grew (the ratchet only shrinks). The
 ratchet compares each rule's total, not each key, so renaming a file or editing a line that holds a
-baselined hit (a new key, same count) passes once the baseline is regenerated.
+baselined hit (a new key, same count) passes once the baseline is regenerated. A baseline records the
+rules it was written with: a rule the base branch's baseline has never seen may enter the baseline
+once, with the hits it finds on adoption, and is ratcheted from then on. For that to hold, the
+baseline that takes the rule's hits must record the rule, and no baseline may stop recording a
+rule that the base branch's baseline records while the catalogue still has it.
 
 ``prompts`` holds every prompt a repo's tests send to a reviewed allowlist (#20): the string given
 to a ``prompt`` / ``user_prompt`` / ``negative_prompt`` / ``negative`` keyword, dict key or variable
@@ -130,6 +134,17 @@ def run_ruff(rules: list[Rule], root: Path, paths: list[str], *, exclude: tuple[
     return hits
 
 
+# service-peer-label's helper rule (same semgrep file) reports the compose services that carry argus.peer.
+# Compose merges files by service name, so an entry in an overlay (compose.build.yaml, compose.gpu.yaml) for a
+# service that a compose file in the same directory labels is that same container, not an unlabelled one.
+PEER_LABEL, PEER_LABELLED = "service-peer-label", "service-peer-labelled"
+
+
+def _compose_service(rel: str, text: str) -> tuple[str, str]:
+    """(directory, service name) for a hit on a compose service's key line."""
+    return os.path.dirname(rel), text.split(":", 1)[0].strip().strip("'\"")
+
+
 def run_semgrep(rules: list[Rule], root: Path, paths: list[str], *, exclude: tuple[str, ...] = EXCLUDE) -> list[Hit]:
     sem = [r for r in rules if r.tool == "semgrep"]
     if not sem:
@@ -141,18 +156,27 @@ def run_semgrep(rules: list[Rule], root: Path, paths: list[str], *, exclude: tup
     for e in exclude:
         cmd += ["--exclude", e]
     r = subprocess.run([*cmd, *_targets(root, paths)], cwd=root, capture_output=True, text=True, check=False)
-    if r.returncode not in (0, 1):
-        raise RuntimeError(f"semgrep failed ({r.returncode}): {r.stderr.strip()[:500]}")
+    # Without --error semgrep exits 0 whatever it finds, and a crash (a Python traceback) exits 1 with no JSON,
+    # so an exit code alone can't tell "no hits" from "never ran": a run counts only with its JSON report.
+    try:
+        report = json.loads(r.stdout) if r.stdout.strip() else None
+    except ValueError:
+        report = None
+    if r.returncode not in (0, 1) or not isinstance(report, dict) or "results" not in report:
+        raise RuntimeError(f"semgrep failed ({r.returncode}): {r.stderr.strip()[-500:]}")
     ids = {x.id for x in sem}
     hits = []
-    for res in json.loads(r.stdout or "{}").get("results") or []:
+    labelled: set[tuple[str, str]] = set()
+    for res in report.get("results") or []:
         rid = str(res.get("check_id") or "").rsplit(".", 1)[-1]
-        if rid not in ids:
-            continue
         rel = os.path.relpath(os.path.join(root, res["path"]), root)
         n = int((res.get("start") or {}).get("line") or 0)
+        if rid == PEER_LABELLED:
+            labelled.add(_compose_service(rel, _line(root, rel, n)))
+        if rid not in ids:
+            continue
         hits.append(Hit(rid, rel, n, _line(root, rel, n), " ".join(str((res.get("extra") or {}).get("message", "")).split())))
-    return hits
+    return [h for h in hits if not (h.rule == PEER_LABEL and _compose_service(h.path, h.text) in labelled)]
 
 
 def scan(root: Path, paths: list[str] | None = None, *, rules: list[Rule] | None = None,
@@ -173,13 +197,32 @@ def read_baseline(path: Path) -> Counter[str]:
     return Counter({f"{e['rule']}|{e['path']}|{e['text']}": int(e.get("count", 1)) for e in data.get("entries") or []})
 
 
-def write_baseline(path: Path, hits: list[Hit], tools: dict[str, str]) -> int:
+# The catalogue when baselines did not yet record their rules: what a baseline with no "rules" list knows.
+RULES_BEFORE_RECORDING = frozenset({
+    "missing-timeout", "silent-except", "predictable-tmp", "request-path-to-fs", "request-url-outbound",
+    "token-compare", "agpl-import", "blocking-in-async", "handler-scans-all", "sibling-checkout-read", "cortex-copy",
+})
+
+
+def baseline_rules(path: Path) -> frozenset[str] | None:
+    """The rules the baseline at *path* was written with; None when there is no baseline."""
+    if not path.is_file():
+        return None
+    known = json.loads(path.read_text(encoding="utf-8")).get("rules")
+    return frozenset(str(r) for r in known) if isinstance(known, list) else RULES_BEFORE_RECORDING
+
+
+def write_baseline(path: Path, hits: list[Hit], tools: dict[str, str], rules: list[str] | None = None) -> int:
     c = counts(hits)
     entries = []
     for key, n in sorted(c.items()):
         rule, rel, text = key.split("|", 2)
         entries.append({"rule": rule, "path": rel, "text": text, "count": n})
-    path.write_text(json.dumps({"version": 1, "tools": tools, "entries": entries}, indent=1) + "\n", encoding="utf-8")
+    data: dict = {"version": 1, "tools": tools}
+    if rules is not None:
+        data["rules"] = sorted(rules)
+    data["entries"] = entries
+    path.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
     return sum(c.values())
 
 
@@ -190,10 +233,19 @@ def _per_rule(c: Counter[str]) -> Counter[str]:
     return out
 
 
-def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None = None) -> dict:
+def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None = None,
+            base_rules: frozenset[str] | None = None, head_rules: frozenset[str] | None = None,
+            catalogue: frozenset[str] | None = None) -> dict:
     """New hits beyond the baseline, entries now fixed, and (given the base branch's baseline) the
     rules whose baselined total grew. Totals per rule, not per key: a renamed file or an edited line
-    moves a hit to a new key without adding one."""
+    moves a hit to a new key without adding one. Given *base_rules*, the rules the base branch's
+    baseline was written with, a rule outside them is new to the repo and may enter the baseline.
+
+    Given *head_rules* too, the rules this baseline records, the ratchet can't be left open:
+    ``unrecorded`` lists the rules that entered as new without being recorded (the next base would
+    still not know them, so they could grow again), and ``dropped`` the rules the base records and
+    this baseline no longer does (the next base would take them for new). A rule that left the
+    *catalogue* may be dropped."""
     cur = counts(hits)
     new = []
     seen: Counter[str] = Counter()
@@ -202,11 +254,15 @@ def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None =
         if seen[h.key] > baseline.get(h.key, 0):
             new.append(h)
     fixed = sum(max(0, n - cur.get(k, 0)) for k, n in baseline.items())
-    grew = []
+    grew, unrecorded, dropped = [], [], []
     if base is not None:
         mine, theirs = _per_rule(baseline), _per_rule(base)
-        grew = sorted(r for r, n in mine.items() if n > theirs.get(r, 0))
-    return {"new": new, "fixed": fixed, "grew": grew}
+        over = sorted(r for r, n in mine.items() if n > theirs.get(r, 0))
+        grew = [r for r in over if base_rules is None or r in base_rules]
+        if base_rules is not None and head_rules is not None:
+            unrecorded = [r for r in over if r not in base_rules and r not in head_rules]
+            dropped = sorted(r for r in base_rules - head_rules if catalogue is None or r in catalogue)
+    return {"new": new, "fixed": fixed, "grew": grew, "unrecorded": unrecorded, "dropped": dropped}
 
 
 def _fixture_files(d: Path, prefix: str) -> list[Path]:
@@ -447,11 +503,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{len(hits)} hits")
         return 0
     if a.cmd == "baseline":
-        n = write_baseline(root / a.write, hits, tools)
+        n = write_baseline(root / a.write, hits, tools, [r.id for r in rules])
         print(f"wrote {n} hits to {a.write}")
         return 0
     base = read_baseline(Path(a.base_baseline)) if a.base_baseline else None
-    rep = compare(hits, read_baseline(root / a.baseline), base)
+    base_rules = baseline_rules(Path(a.base_baseline)) if a.base_baseline else None
+    head_rules = baseline_rules(root / a.baseline)  # None: no baseline here, so it records nothing
+    rep = compare(hits, read_baseline(root / a.baseline), base, base_rules,
+                  head_rules if head_rules is not None else frozenset(), frozenset(r.id for r in rules))
     by_rule = {r.id: r for r in rules}
     if rep["new"]:
         print(f"{len(rep['new'])} new suite-rule violation(s):")
@@ -462,11 +521,19 @@ def main(argv: list[str] | None = None) -> int:
     if rep["grew"]:
         print(f"The baseline grew for {len(rep['grew'])} rule(s) compared with the base branch "
               f"({', '.join(rep['grew'])}); it may only shrink.")
+    if rep["unrecorded"]:
+        print(f"The baseline holds hits for {len(rep['unrecorded'])} rule(s) new to this repo "
+              f"({', '.join(rep['unrecorded'])}) without recording them in its `rules` list: "
+              "write it with `check.py baseline`, not by hand.")
+    if rep["dropped"]:
+        print(f"The baseline no longer records {len(rep['dropped'])} rule(s) that the base branch's baseline does "
+              f"({', '.join(rep['dropped'])}): write it with `check.py baseline`, and keep the file even when it is empty.")
     if rep["fixed"]:
         print(f"{rep['fixed']} baselined hit(s) are fixed: run `check.py baseline` to shrink the baseline.")
-    if not rep["new"] and not rep["grew"]:
+    failed = bool(rep["new"] or rep["grew"] or rep["unrecorded"] or rep["dropped"])
+    if not failed:
         print(f"ok: {len(hits)} hit(s), all in the baseline")
-    return 1 if rep["new"] or rep["grew"] else 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+# An Argus service with no argus.peer label: the directory cannot list it.
+services:
+  argus-widget:
+    build: .
+    ports:
+      - "${WIDGET_PORT:-8199}:8199"
+    labels:
+      argus.service: argus-widget
+      argus.health: /health
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8199/health?checks=0"]

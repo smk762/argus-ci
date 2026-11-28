@@ -1,0 +1,18 @@
+# An overlay beside negative.compose.yaml. Compose merges the two by service name, so `argus-widget` here is the
+# container the base file labels, even though this entry names a build. `gadget` only adjusts: nothing to check.
+services:
+  argus-widget:
+    build:
+      context: .
+      args:
+        GPU: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  gadget:
+    volumes:
+      - ./weights:/weights:ro

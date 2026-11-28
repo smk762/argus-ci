@@ -6,6 +6,9 @@ Shared, reusable GitHub Actions workflows for the [Argus suite](https://github.c
 The goal is one place to define the `uv` + `ruff` + `pytest` + `build` pipeline so
 every repo stays in lockstep instead of drifting.
 
+How it fits with the package template, the schema gate and the image rebuilds, with the numbers from 1,347 CI runs:
+[One release pipeline for sixteen packages](https://dragonhound.dev/updates/2026-11-27-one-release-pipeline/).
+
 ## `python-ci.yml`
 
 Reusable CI: lint (ruff), test matrix (pytest over an editable install), and a build
@@ -197,6 +200,43 @@ RUFF="uvx ruff@0.15.16" SEMGREP="uvx --from semgrep==1.180.0 semgrep" \
 To silence one hit for a reason, add `# noqa: <code>` (ruff rules) or `# nosemgrep: <rule-id>`
 on that line, with the reason in the comment. When you fix baselined hits, run `baseline` again so
 the file shrinks.
+
+When the catalogue gains a rule, a repo with existing hits regenerates its baseline in a pull request.
+The baseline records the rules it was written with, so a rule the base branch's baseline has never
+seen may enter with its hits once. After that it only shrinks, like the rest. Write the baseline with
+`check.py baseline`, not by hand: the check fails when a baseline takes a new rule's hits without
+recording the rule, or stops recording a rule that the base branch's baseline records (so keep the
+file even when it is empty).
+
+### The service directory rules
+
+Two conventions keep the suite's service directory complete (argus-cortex#212). They run in every
+repo that calls the workflow, whatever its kind: a UI or stack repo's compose file runs services too.
+
+- **`service-peer-label`**: every service in a compose file (`*compose*.yaml` / `.yml`) carries an
+  `argus.peer` label, the name argus-iris's directory lists it under. The label may be a mapping or
+  a `key=value` list, on the service or in an anchor it merges (`<<: *service`). A repo with no
+  compose file has nothing to check.
+  - The rule doesn't guess which containers are peers. One that isn't (a third-party image, a
+    one-shot CLI or test container, a trainer, a Wyoming bridge, a web UI) says so on its own line:
+
+    ```yaml
+    services:
+      kubo:  # nosemgrep: service-peer-label  third-party image (IPFS)
+        image: ipfs/kubo:v0.43.1
+    ```
+
+  - An overlay file is read with the files beside it. An entry in `compose.build.yaml` for a
+    service that `compose.yaml` in the same directory labels is that same container and passes. An
+    entry with no `image`, `build` or merged anchor only adjusts a service and isn't checked.
+- **`handrolled-health`**: a Starlette or FastAPI app serves `/health` through
+  `argus_cortex.service.install_health`, not a route of its own (`@app.get("/health")`,
+  `add_api_route`, `add_route`, `Route("/health", ...)`). A guard in front of the app that answers
+  its own body for `/health`, as argus-echo's does, registers no route and passes. Calling a peer's
+  `/health` is not a route either.
+
+The rule can't tell that an app serves no `/health` at all, or that `argus.peer` names the right
+peer. `argus.port` on a container that publishes several ports isn't checked.
 
 | Input | Default | Meaning |
 |---|---|---|

@@ -6,7 +6,8 @@
 # argus-ci's own CI and in ai-code-auditor's rules.fixtures gate.
 #
 # A repo opts in through the suite-rules.yml reusable workflow. Existing violations live in the
-# repo's .suite-rules-baseline.json: CI fails on new ones only, and the baseline may only shrink.
+# repo's .suite-rules-baseline.json: CI fails on new ones only, and the baseline may only shrink
+# (a rule added here later may enter a repo's baseline once, with the hits it finds on adoption).
 # To silence one hit for a reason, use `# noqa: <code>` (ruff) or `# nosemgrep: <id>` (semgrep)
 # on that line, with the reason in the comment.
 #
@@ -116,3 +117,28 @@ kind = "convention"
 tool = "semgrep"
 severity = "LOW"
 message = "This redefines a helper argus-cortex ships (safe_join, safe_name, env_flag, WriteGuard, DEFAULT_EXPOSED_LABELS). Import it from argus_cortex instead."
+
+[[rules]]
+id = "service-peer-label"
+class = "unhandled_error"
+# The suite's service directory (argus-cortex#212): argus-iris lists a container by its `argus.peer`
+# compose label, so an unlabelled service can't be found, probed or shown. Every service in a compose
+# file that names an image, a build or a merged anchor needs the label, or a reasoned
+# `# nosemgrep: service-peer-label` on its own line: the rule doesn't guess which containers are
+# third-party, one-shot or a UI. An overlay entry that only adjusts a service defined elsewhere
+# (no image, build or anchor) is not checked. A convention: its hits are not findings.
+kind = "convention"
+tool = "semgrep"
+severity = "LOW"
+message = "This compose service has no argus.peer label, so the suite directory (argus-iris) can't list it. Add labels: argus.peer (plus argus.service, argus.health, argus.port; see argus_cortex.service). If the container is not a peer (third-party, one-shot, a trainer, a UI), put `# nosemgrep: service-peer-label <reason>` on the service's line."
+
+[[rules]]
+id = "handrolled-health"
+class = "unhandled_error"
+# The other half of argus-cortex#212: one /health body for the suite. A route registered by hand
+# answers a per-service shape the directory, scout and the dashboard can't read. A guard in front
+# of the app (argus-echo's ASGI wrapper for its 503 bodies) registers no route and passes.
+kind = "convention"
+tool = "semgrep"
+severity = "LOW"
+message = "A /health route is registered by hand. Serve it with argus_cortex.service.install_health(app, service=...), which answers the suite's ServiceHealth body; pass the service's own fields through extra=."

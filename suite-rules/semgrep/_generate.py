@@ -225,6 +225,21 @@ PROPAGATORS = r"""    pattern-propagators:
           - focus-metavariable: $F
         from: $X
         to: $F
+      # Joining or normalising keeps what the caller sent: os.path.join(root, "/etc/passwd") drops root, '..'
+      # survives normpath and abspath, and urljoin(base, "http://elsewhere/") drops base.
+      - by-side-effect: false
+        patterns:
+          - pattern: $F(..., $X, ...)
+          - metavariable-pattern:
+              metavariable: $F
+              patterns:
+                - pattern-either:
+""" + "".join(f"                    - pattern: {m}.{f}\n" for m in ("os.path", "posixpath", "ntpath")
+              for f in ("join", "normpath", "abspath", "realpath", "expanduser")) + """\
+                    - pattern: urllib.parse.urljoin
+          - focus-metavariable: $F
+        from: $X
+        to: $F
 """
 
 

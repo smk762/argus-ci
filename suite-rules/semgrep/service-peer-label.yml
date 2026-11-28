@@ -19,6 +19,9 @@ rules:
       include:
         - "*compose*.yaml"
         - "*compose*.yml"
+      # A workflow's `jobs.<id>.services` is not a compose file, whatever the workflow is called.
+      exclude:
+        - ".github/"
     patterns:
       # A direct child of `services:` that says what it runs: an image, a build, or a merged anchor. An overlay
       # entry that only adjusts a service defined in another file has none of the three.
@@ -98,6 +101,9 @@ rules:
       include:
         - "*compose*.yaml"
         - "*compose*.yml"
+      # A workflow's `jobs.<id>.services` is not a compose file, whatever the workflow is called.
+      exclude:
+        - ".github/"
     patterns:
       - pattern-inside: |
           services:

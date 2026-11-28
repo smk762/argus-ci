@@ -2853,6 +2853,34 @@ rules:
           - focus-metavariable: $F
         from: $X
         to: $F
+      # Joining or normalising keeps what the caller sent: os.path.join(root, "/etc/passwd") drops root, '..'
+      # survives normpath and abspath, and urljoin(base, "http://elsewhere/") drops base.
+      - by-side-effect: false
+        patterns:
+          - pattern: $F(..., $X, ...)
+          - metavariable-pattern:
+              metavariable: $F
+              patterns:
+                - pattern-either:
+                    - pattern: os.path.join
+                    - pattern: os.path.normpath
+                    - pattern: os.path.abspath
+                    - pattern: os.path.realpath
+                    - pattern: os.path.expanduser
+                    - pattern: posixpath.join
+                    - pattern: posixpath.normpath
+                    - pattern: posixpath.abspath
+                    - pattern: posixpath.realpath
+                    - pattern: posixpath.expanduser
+                    - pattern: ntpath.join
+                    - pattern: ntpath.normpath
+                    - pattern: ntpath.abspath
+                    - pattern: ntpath.realpath
+                    - pattern: ntpath.expanduser
+                    - pattern: urllib.parse.urljoin
+          - focus-metavariable: $F
+        from: $X
+        to: $F
 
     pattern-sinks:
       # The URL itself is a sink. A template is too, unless a constant prefix ends the authority

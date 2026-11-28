@@ -144,3 +144,36 @@ def model(name: str):
     if name in models:
         return FileResponse(RECORDINGS / name)
     raise HTTPException(404)
+
+
+@app.get("/resolved/{name}")
+def resolved(name: str):
+    # Resolved when assigned, then checked: the check sees the path that is served.
+    p = (RECORDINGS / name).resolve()
+    if not p.is_relative_to(RECORDINGS):
+        raise HTTPException(404)
+    return FileResponse(p)
+
+
+@app.get("/resolved-rel/{name}")
+def resolved_rel(name: str):
+    p = (RECORDINGS / name).resolve()
+    p.relative_to(RECORDINGS)
+    return FileResponse(p)
+
+
+@app.get("/resolved-parent/{name}")
+def resolved_parent(name: str):
+    p = (RECORDINGS / name).resolve()
+    if p.parent != RECORDINGS:
+        raise HTTPException(404)
+    return FileResponse(p)
+
+
+@app.get("/stripped/{name}")
+def stripped(name: str):
+    # Assigned before the guard, so the guard checks the value that is used.
+    name = name.strip()
+    if name not in ALLOWED:
+        raise HTTPException(404)
+    return FileResponse(RECORDINGS / name)

@@ -17,7 +17,9 @@ given the base branch's baseline, when the baseline itself grew (the ratchet onl
 ratchet compares each rule's total, not each key, so renaming a file or editing a line that holds a
 baselined hit (a new key, same count) passes once the baseline is regenerated. A baseline records the
 rules it was written with: a rule the base branch's baseline has never seen may enter the baseline
-once, with the hits it finds on adoption, and is ratcheted from then on.
+once, with the hits it finds on adoption, and is ratcheted from then on. For that to hold, the
+baseline that takes the rule's hits must record the rule, and no baseline may stop recording a
+rule that the base branch's baseline records while the catalogue still has it.
 
 ``prompts`` holds every prompt a repo's tests send to a reviewed allowlist (#20): the string given
 to a ``prompt`` / ``user_prompt`` / ``negative_prompt`` / ``negative`` keyword, dict key or variable
@@ -232,11 +234,18 @@ def _per_rule(c: Counter[str]) -> Counter[str]:
 
 
 def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None = None,
-            base_rules: frozenset[str] | None = None) -> dict:
+            base_rules: frozenset[str] | None = None, head_rules: frozenset[str] | None = None,
+            catalogue: frozenset[str] | None = None) -> dict:
     """New hits beyond the baseline, entries now fixed, and (given the base branch's baseline) the
     rules whose baselined total grew. Totals per rule, not per key: a renamed file or an edited line
     moves a hit to a new key without adding one. Given *base_rules*, the rules the base branch's
-    baseline was written with, a rule outside them is new to the repo and may enter the baseline."""
+    baseline was written with, a rule outside them is new to the repo and may enter the baseline.
+
+    Given *head_rules* too, the rules this baseline records, the ratchet can't be left open:
+    ``unrecorded`` lists the rules that entered as new without being recorded (the next base would
+    still not know them, so they could grow again), and ``dropped`` the rules the base records and
+    this baseline no longer does (the next base would take them for new). A rule that left the
+    *catalogue* may be dropped."""
     cur = counts(hits)
     new = []
     seen: Counter[str] = Counter()
@@ -245,12 +254,15 @@ def compare(hits: list[Hit], baseline: Counter[str], base: Counter[str] | None =
         if seen[h.key] > baseline.get(h.key, 0):
             new.append(h)
     fixed = sum(max(0, n - cur.get(k, 0)) for k, n in baseline.items())
-    grew = []
+    grew, unrecorded, dropped = [], [], []
     if base is not None:
         mine, theirs = _per_rule(baseline), _per_rule(base)
-        grew = sorted(r for r, n in mine.items()
-                      if n > theirs.get(r, 0) and (base_rules is None or r in base_rules))
-    return {"new": new, "fixed": fixed, "grew": grew}
+        over = sorted(r for r, n in mine.items() if n > theirs.get(r, 0))
+        grew = [r for r in over if base_rules is None or r in base_rules]
+        if base_rules is not None and head_rules is not None:
+            unrecorded = [r for r in over if r not in base_rules and r not in head_rules]
+            dropped = sorted(r for r in base_rules - head_rules if catalogue is None or r in catalogue)
+    return {"new": new, "fixed": fixed, "grew": grew, "unrecorded": unrecorded, "dropped": dropped}
 
 
 def _fixture_files(d: Path, prefix: str) -> list[Path]:
@@ -496,7 +508,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     base = read_baseline(Path(a.base_baseline)) if a.base_baseline else None
     base_rules = baseline_rules(Path(a.base_baseline)) if a.base_baseline else None
-    rep = compare(hits, read_baseline(root / a.baseline), base, base_rules)
+    head_rules = baseline_rules(root / a.baseline)  # None: no baseline here, so it records nothing
+    rep = compare(hits, read_baseline(root / a.baseline), base, base_rules,
+                  head_rules if head_rules is not None else frozenset(), frozenset(r.id for r in rules))
     by_rule = {r.id: r for r in rules}
     if rep["new"]:
         print(f"{len(rep['new'])} new suite-rule violation(s):")
@@ -507,11 +521,19 @@ def main(argv: list[str] | None = None) -> int:
     if rep["grew"]:
         print(f"The baseline grew for {len(rep['grew'])} rule(s) compared with the base branch "
               f"({', '.join(rep['grew'])}); it may only shrink.")
+    if rep["unrecorded"]:
+        print(f"The baseline holds hits for {len(rep['unrecorded'])} rule(s) new to this repo "
+              f"({', '.join(rep['unrecorded'])}) without recording them in its `rules` list: "
+              "write it with `check.py baseline`, not by hand.")
+    if rep["dropped"]:
+        print(f"The baseline no longer records {len(rep['dropped'])} rule(s) that the base branch's baseline does "
+              f"({', '.join(rep['dropped'])}): write it with `check.py baseline`, and keep the file even when it is empty.")
     if rep["fixed"]:
         print(f"{rep['fixed']} baselined hit(s) are fixed: run `check.py baseline` to shrink the baseline.")
-    if not rep["new"] and not rep["grew"]:
+    failed = bool(rep["new"] or rep["grew"] or rep["unrecorded"] or rep["dropped"])
+    if not failed:
         print(f"ok: {len(hits)} hit(s), all in the baseline")
-    return 1 if rep["new"] or rep["grew"] else 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -67,20 +67,67 @@ class Baseline(unittest.TestCase):
             self.assertNotIn("handrolled-health", old)
             self.assertIsNone(check.baseline_rules(Path(d) / "missing.json"))
 
-    def test_check_lets_a_new_rule_into_the_baseline_and_then_ratchets_it(self):
-        entry = {"rule": "service-peer-label", "path": "compose.yaml", "text": "db:", "count": 1}
+    def test_a_new_rule_must_be_recorded_by_the_baseline_that_takes_its_hits(self):
+        mine = Counter({hit(rule="new-rule").key: 3, hit().key: 1})
+        base = Counter({hit().key: 1})
+        rep = check.compare([], mine, base, frozenset({"r"}), frozenset({"r"}))
+        # Not recorded: the next base would still not know new-rule, and it could grow again.
+        self.assertEqual((rep["grew"], rep["unrecorded"]), ([], ["new-rule"]))
+        rep = check.compare([], mine, base, frozenset({"r"}), frozenset({"r", "new-rule"}))
+        self.assertEqual((rep["grew"], rep["unrecorded"], rep["dropped"]), ([], [], []))
+
+    def test_a_baseline_may_not_stop_recording_a_rule(self):
+        base = Counter({hit().key: 1})
+        known = frozenset({"r", "q"})
+        # `"rules": []` would make every rule new to the next base, and so free to grow.
+        self.assertEqual(check.compare([], base, base, known, frozenset())["dropped"], ["q", "r"])
+        self.assertEqual(check.compare([], base, base, known, frozenset({"r"}))["dropped"], ["q"])
+        # A rule that left the catalogue is dropped by regenerating: that is not a failure.
+        self.assertEqual(check.compare([], base, base, known, frozenset({"r"}), frozenset({"r"}))["dropped"], [])
+        self.assertEqual(check.compare([], base, base, known, known | {"new-rule"})["dropped"], [])
+
+    def _check(self, head: dict | None, base: dict) -> tuple[int, str]:
+        """`check` on a repo with no hits, its baseline *head* (None: no file) and the base branch's *base*."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d) / "repo"
             root.mkdir()
-            (root / check.BASELINE).write_text(json.dumps({"version": 1, "tools": {}, "entries": [entry]}))
-            old_base, new_base = Path(d) / "old.json", Path(d) / "new.json"
-            old_base.write_text(json.dumps({"version": 1, "tools": {}, "entries": []}))
-            new_base.write_text(json.dumps({"version": 1, "tools": {}, "rules": ["service-peer-label"], "entries": []}))
+            if head is not None:
+                (root / check.BASELINE).write_text(json.dumps({"version": 1, "tools": {}, **head}))
+            base_file = Path(d) / "base.json"
+            base_file.write_text(json.dumps({"version": 1, "tools": {}, **base}))
             out = io.StringIO()
             with mock.patch.object(check, "scan", lambda *a, **kw: []), redirect_stdout(out):
-                self.assertEqual(check.main(["check", "--root", str(root), "--base-baseline", str(old_base)]), 0)
-                self.assertEqual(check.main(["check", "--root", str(root), "--base-baseline", str(new_base)]), 1)
-            self.assertIn("service-peer-label", out.getvalue())
+                code = check.main(["check", "--root", str(root), "--base-baseline", str(base_file)])
+            return code, out.getvalue()
+
+    def test_check_lets_a_new_rule_into_the_baseline_and_then_ratchets_it(self):
+        entry = {"rule": "service-peer-label", "path": "compose.yaml", "text": "db:", "count": 1}
+        old = sorted(check.RULES_BEFORE_RECORDING)
+        head = {"rules": [*old, "service-peer-label"], "entries": [entry]}
+        self.assertEqual(self._check(head, {"entries": []})[0], 0)  # the base predates the rule
+        code, out = self._check(head, {"rules": [*old, "service-peer-label"], "entries": []})
+        self.assertEqual(code, 1)
+        self.assertIn("grew", out)
+
+    def test_check_refuses_a_hand_added_entry_for_a_rule_the_baseline_does_not_record(self):
+        # An old baseline with no `rules` list, never regenerated: hand-added entries for a newer rule
+        # would pass in every PR, because the base never learns the rule.
+        entry = {"rule": "service-peer-label", "path": "compose.yaml", "text": "db:", "count": 1}
+        code, out = self._check({"entries": [entry]}, {"entries": []})
+        self.assertEqual(code, 1)
+        self.assertIn("without recording", out)
+
+    def test_check_refuses_a_baseline_that_drops_rules(self):
+        every = sorted(r.id for r in check.load_rules()[0])
+        for head in ({"rules": [], "entries": []}, {"entries": []}, None):  # emptied, key removed, file deleted
+            code, out = self._check(head, {"rules": every, "entries": []})
+            self.assertEqual(code, 1, head)
+            self.assertIn("no longer records", out)
+        self.assertEqual(self._check({"rules": every, "entries": []}, {"rules": every, "entries": []})[0], 0)
+        # An old baseline on both sides knows the same rules: nothing was dropped.
+        self.assertEqual(self._check({"entries": []}, {"entries": []})[0], 0)
+        # A rule that is no longer in the catalogue goes when the baseline is regenerated.
+        self.assertEqual(self._check({"rules": every, "entries": []}, {"rules": [*every, "retired"], "entries": []})[0], 0)
 
     def test_baseline_round_trip(self):
         with tempfile.TemporaryDirectory() as d:
@@ -254,14 +301,21 @@ class Generate(unittest.TestCase):
                      "- pattern: os.path.commonpath([..., $X, ...])\n", "if <... $X.resolve() ...>:"):
             self.assertNotIn(gone, san + "\n", gone)
         # Every guard that is not a raising call has to reject: no `if X in C: pass`-style sanitizer.
-        self.assertEqual(san.count("by-side-effect: true"), 2)
+        # The three by side effect are the raising validator and relative_to() on a resolved path, twice.
+        self.assertEqual(san.count("by-side-effect: true"), 3)
+        self.assertEqual(san.count(".relative_to(...)\n"), 2)
 
     def test_containment_checks_need_a_resolved_path(self):
         # Neither is_relative_to() nor commonpath() collapses `..`: on an unresolved path they confine nothing.
         san = _generate.SANITIZERS
-        for gone in ("if not $X.is_relative_to(...):", "os.path.commonpath([..., $X, ...]) != $B",
-                     "$B != os.path.commonpath([..., $X, ...])"):
-            self.assertNotIn(gone, san, gone)
+        # The checks on a bare $X count only where $X was assigned from resolve(): each block that
+        # holds one also holds that assignment.
+        blocks = san.split("\n      - ")
+        for bare in ("if not $X.is_relative_to(...):", "os.path.commonpath([..., $X, ...]) != $B",
+                     "$B != os.path.commonpath([..., $X, ...])", "- pattern: $X.relative_to(...)", "if $X.parent != $B:"):
+            holding = [b for b in blocks if bare in b]
+            self.assertEqual(len(holding), 1, bare)
+            self.assertIn("- pattern-inside: |\n              $X = $R.resolve(...)\n              ...\n", holding[0], bare)
         for kept in ("if not $X.resolve(...).is_relative_to(...):", "os.path.commonpath([..., $X.resolve(...), ...]) != $B",
                      "os.path.commonpath([..., os.path.$NORM($X), ...]) != $B", "regex: ^(realpath|abspath|normpath)$"):
             self.assertIn(kept, san, kept)
@@ -288,13 +342,56 @@ class Generate(unittest.TestCase):
         self.assertIn("if ... or $X not in $C:\n", guard)
         self.assertIn("if ... or $X not in $C or ...:\n", guard)
 
+    def test_a_guard_clears_only_the_code_after_it(self):
+        guard = _generate._guard(["$X not in $C"], "c")
+        # Not its own body, where the check failed, and not once $X is assigned again.
+        self.assertIn("- pattern-not-inside: |\n              if $X not in $C:\n                  ...\n", guard)
+        self.assertIn("- pattern-not-inside: |\n              if $X not in $C:\n                  ...\n"
+                      "              ...\n              $X = $V\n              ...\n", guard)
+        for form in _generate._GUARD_FORMS:
+            self.assertEqual(guard.count("- pattern-not-inside: |\n              " + form.format(c="$X not in $C") + "\n"), 2)
+
     def test_request_method_takes_the_url_second(self):
         sinks = _generate.URL_SINKS
         for pat in ("requests.request($METHOD, $U, ...)", "httpx.request($METHOD, $U, ...)",
                     "$C.request($METHOD, $U, ...)", "$C.request(url=$U, ...)"):
             self.assertIn(pat, sinks, pat)
-        # The first-positional method list must not include request(), or the method string is the sink.
-        self.assertNotIn("|request|", sinks)
+        # The first-positional method list must not include request() or stream(), or the method string is the sink.
+        self.assertNotIn("|request", sinks)
+        self.assertNotIn("|stream", sinks)
+        for pat in ("httpx.stream($METHOD, $U, ...)", "$C.stream($METHOD, $U, ...)", "$C.stream(url=$U, ...)"):
+            self.assertIn(pat, sinks, pat)
+        self.assertNotIn("requests.stream", sinks)  # requests has no stream()
+
+    def test_a_pinned_template_in_second_place_is_not_a_sink(self):
+        sinks = _generate.URL_SINKS
+        for t in _generate.TEMPLATES:
+            for m in ("request", "stream"):
+                self.assertIn(f"- pattern-not: $O.{m}($METHOD, {t}, ...)\n", sinks)
+        # Not `$F($METHOD, <template>, ...)`: that would also drop `requests.post(url, f"...")`.
+        self.assertNotIn("pattern-not: $F($METHOD", sinks)
+
+    def test_only_the_part_in_the_authority_is_the_sink(self):
+        import re
+        hole = [re.compile(_generate._unpinned_fstring(k)) for k in range(_generate._HOLES)]
+
+        def holes(s):
+            return sorted(m.group("U") for rx in hole for m in rx.finditer(s))
+
+        self.assertEqual(holes('f"https://{HOST}/users/{uid}"'), ["HOST"])
+        self.assertEqual(holes('f"https://{sub}.{host}:{port}/x/{uid}"'), ["host", "port", "sub"])
+        self.assertEqual(holes('f"{scheme}://{host}/x"'), ["host"])
+        self.assertEqual(holes('f"https://api.example.com/users/{uid}"'), [])
+
+        def args(s):
+            return [i for i in range(_generate._HOLES) if re.match(_generate._unpinned_format(i), s)]
+
+        self.assertEqual(args('"{}/users/{}"'), [0])
+        self.assertEqual(args('"https://{}:{}/users/{}"'), [0, 1])
+        self.assertEqual(args('"{}://{}/users"'), [0, 1])
+        self.assertEqual(args('"https://{1}/users/{0}"'), [1])
+        self.assertEqual(args('"https://api.example.com/orgs/{}"'), [])
+        self.assertEqual(args('"/orgs/{}"'), [])
 
     def test_urlopen_keyword_is_a_sink(self):
         sinks = _generate.URL_SINKS
@@ -317,8 +414,15 @@ class Generate(unittest.TestCase):
         # call. The argument's taint has to reach the result.
         text = _generate.rule("r", "c", "m", "")
         self.assertIn("^(.*\\.)?basename$", text)
-        self.assertIn("^(.*\\.)?(Pure)?Path$", text)
+        self.assertIn("^(.*\\.)?(Pure)?(Posix|Windows)?Path$", text)
+        import re
+        for cls in ("Path", "PurePath", "PurePosixPath", "PureWindowsPath", "PosixPath", "WindowsPath", "pathlib.PurePosixPath"):
+            self.assertTrue(re.match(r"^(.*\.)?(Pure)?(Posix|Windows)?Path$", cls), cls)
         self.assertIn("by-side-effect: false", text)
+
+    def test_resolve_passes_its_path_through(self):
+        # taint_assume_safe_functions would clear `p = (root / X).resolve()`; resolving confines nothing.
+        self.assertIn("pattern: $X.resolve\n", _generate.PROPAGATORS)
 
 
 def _semgrep_available() -> bool:
@@ -416,6 +520,8 @@ class ServiceDirectory(unittest.TestCase):
         workflow = "jobs:\n  test:\n    services:\n      postgres:\n        image: postgres:17\n"
         self.assertEqual(self.hits({".github/workflows/ci.yml": workflow, "config.yaml": LABELLED.replace(
             "      argus.peer: widget\n", "")}), [])
+        # Nor is a workflow whose own name says compose: its `services` are job containers.
+        self.assertEqual(self.hits({".github/workflows/compose-smoke.yml": workflow}), [])
 
     def test_a_hand_rolled_health_route_fails(self):
         app = ("from fastapi import FastAPI\n\napp = FastAPI()\n\n\n"

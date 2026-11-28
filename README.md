@@ -203,7 +203,10 @@ the file shrinks.
 
 When the catalogue gains a rule, a repo with existing hits regenerates its baseline in a pull request.
 The baseline records the rules it was written with, so a rule the base branch's baseline has never
-seen may enter with its hits once. After that it only shrinks, like the rest.
+seen may enter with its hits once. After that it only shrinks, like the rest. Write the baseline with
+`check.py baseline`, not by hand: the check fails when a baseline takes a new rule's hits without
+recording the rule, or stops recording a rule that the base branch's baseline records (so keep the
+file even when it is empty).
 
 ### The service directory rules
 

@@ -92,6 +92,25 @@ class Baseline(unittest.TestCase):
         self.assertEqual(check.read_baseline(Path("/nonexistent")), Counter())
 
 
+class SemgrepRun(unittest.TestCase):
+    """A semgrep that crashed must fail the check, never read as a clean run."""
+
+    def _run(self, code):
+        rule = next(r for r in check.load_rules()[0] if r.tool == "semgrep")
+        fake = f"{sys.executable} -c {code!r}"
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"SEMGREP": fake}):
+            Path(d, "a.py").write_text("x = 1\n")
+            return check.run_semgrep([rule], Path(d), [])
+
+    def test_a_crash_with_exit_1_and_no_report_fails(self):
+        # what semgrep did with an unwritable HOME: a traceback on stderr, exit 1, nothing on stdout
+        with self.assertRaisesRegex(RuntimeError, "semgrep failed"):
+            self._run("import sys; sys.stderr.write('PermissionError'); sys.exit(1)")
+
+    def test_a_report_with_no_results_is_a_clean_run(self):
+        self.assertEqual(self._run("import json; print(json.dumps({'results': [], 'errors': []}))"), [])
+
+
 class Prompts(unittest.TestCase):
     def test_prompt_named_values_are_collected(self):
         src = (

@@ -154,12 +154,18 @@ def run_semgrep(rules: list[Rule], root: Path, paths: list[str], *, exclude: tup
     for e in exclude:
         cmd += ["--exclude", e]
     r = subprocess.run([*cmd, *_targets(root, paths)], cwd=root, capture_output=True, text=True, check=False)
-    if r.returncode not in (0, 1):
-        raise RuntimeError(f"semgrep failed ({r.returncode}): {r.stderr.strip()[:500]}")
+    # Without --error semgrep exits 0 whatever it finds, and a crash (a Python traceback) exits 1 with no JSON,
+    # so an exit code alone can't tell "no hits" from "never ran": a run counts only with its JSON report.
+    try:
+        report = json.loads(r.stdout) if r.stdout.strip() else None
+    except ValueError:
+        report = None
+    if r.returncode not in (0, 1) or not isinstance(report, dict) or "results" not in report:
+        raise RuntimeError(f"semgrep failed ({r.returncode}): {r.stderr.strip()[-500:]}")
     ids = {x.id for x in sem}
     hits = []
     labelled: set[tuple[str, str]] = set()
-    for res in json.loads(r.stdout or "{}").get("results") or []:
+    for res in report.get("results") or []:
         rid = str(res.get("check_id") or "").rsplit(".", 1)[-1]
         rel = os.path.relpath(os.path.join(root, res["path"]), root)
         n = int((res.get("start") or {}).get("line") or 0)

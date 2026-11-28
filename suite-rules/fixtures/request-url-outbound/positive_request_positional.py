@@ -7,7 +7,7 @@ from urllib.request import urlopen
 app = FastAPI()
 
 
-# request(method, url) takes the URL second. urlopen's parameter name is url.
+# request(method, url) takes the URL second; urlopen takes it first (positive_urlopen_keyword.py has url=).
 @app.post("/proxy")
 def proxy(url: str):
     return requests.request("GET", url, timeout=5).text
@@ -38,9 +38,9 @@ def via_pool(url: str):
 
 @app.post("/open")
 def open_url(url: str):
-    return urlopen(url=url).read()
+    return urlopen(url).read()
 
 
 @app.post("/open-qualified")
 def open_qualified(url: str):
-    return urllib.request.urlopen(url=url).read()
+    return urllib.request.urlopen(url).read()

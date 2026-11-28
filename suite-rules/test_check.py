@@ -256,6 +256,23 @@ class Generate(unittest.TestCase):
         # Every guard that is not a raising call has to reject: no `if X in C: pass`-style sanitizer.
         self.assertEqual(san.count("by-side-effect: true"), 2)
 
+    def test_containment_checks_need_a_resolved_path(self):
+        # Neither is_relative_to() nor commonpath() collapses `..`: on an unresolved path they confine nothing.
+        san = _generate.SANITIZERS
+        for gone in ("if not $X.is_relative_to(...):", "os.path.commonpath([..., $X, ...]) != $B",
+                     "$B != os.path.commonpath([..., $X, ...])"):
+            self.assertNotIn(gone, san, gone)
+        for kept in ("if not $X.resolve(...).is_relative_to(...):", "os.path.commonpath([..., $X.resolve(...), ...]) != $B",
+                     "os.path.commonpath([..., os.path.$NORM($X), ...]) != $B", "regex: ^(realpath|abspath|normpath)$"):
+            self.assertIn(kept, san, kept)
+
+    def test_werkzeug_safe_join_is_not_a_raising_validator(self):
+        # It returns None for a path outside the root, so only a rejecting `is None` guard clears it.
+        san = _generate.SANITIZERS
+        for name in ("werkzeug.utils.safe_join", "werkzeug.security.safe_join", "flask.safe_join"):
+            self.assertIn(f"- pattern-not: {name}(...)\n", san, name)
+            self.assertIn(f"if {name}(..., $X, ...) is None:", san, name)
+
     def test_url_templates_are_sinks_at_their_leading_part(self):
         sinks = _generate.URL_SINKS
         self.assertIn('- pattern: f"{$U}..."', sinks)
@@ -274,7 +291,7 @@ class Generate(unittest.TestCase):
     def test_request_method_takes_the_url_second(self):
         sinks = _generate.URL_SINKS
         for pat in ("requests.request($METHOD, $U, ...)", "httpx.request($METHOD, $U, ...)",
-                    "$C.request($METHOD, $U, ...)"):
+                    "$C.request($METHOD, $U, ...)", "$C.request(url=$U, ...)"):
             self.assertIn(pat, sinks, pat)
         # The first-positional method list must not include request(), or the method string is the sink.
         self.assertNotIn("|request|", sinks)

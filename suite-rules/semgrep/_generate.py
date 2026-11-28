@@ -87,6 +87,15 @@ def _guard(conds: list[str], comment: str, where: str = "") -> str:
     return "\n".join(out) + where + "\n          - pattern: $X"
 
 
+def _commonpath(x: str) -> list[str]:
+    """`commonpath([..., x, ...])` differing from the root, either way round."""
+    return [f"os.path.commonpath([..., {x}, ...]) != $B", f"$B != os.path.commonpath([..., {x}, ...])"]
+
+
+# os.path functions that collapse `..`, so commonpath() over their result means containment.
+_NORMALISED = "\n          - metavariable-regex:\n              metavariable: $NORM\n              regex: ^(realpath|abspath|normpath)$"
+
+
 def _in_allowlist_body() -> str:
     """The body of `if X in ALLOWED` when that check dominates and the if has no else.
 
@@ -115,8 +124,13 @@ def _in_allowlist_body() -> str:
 
 # Callee names, anchored on the function's own name (the last dotted part).
 # Validators that raise on a bad value clear it by side effect; predicates only count inside a rejecting guard.
+# `safe_join` is argus_cortex.fs's, which raises; Werkzeug's and Flask's return None instead (WERKZEUG_SAFE_JOIN).
 RAISING_VALIDATOR = r"^(.*\.)?(validate_\w+|ensure_(safe|valid|allowed|within|under)\w*|require_(safe|valid|allowed|within|under)\w*|safe_join|safe_name|safe_path|resolve_under\w*|\w+_or_404)$"
 PREDICATE = r"^(.*\.)?(is_\w*(safe|valid|allowed|permitted|within|under_root)\w*|\w+_is_(safe|valid|allowed)|allowed_\w+|\w+_(allowed|permitted))$"
+
+# Werkzeug's safe_join (and Flask's re-export) returns None for a path that leaves the root; it never raises.
+WERKZEUG_SAFE_JOIN = ("werkzeug.utils.safe_join", "werkzeug.security.safe_join", "flask.safe_join",
+                      "flask.helpers.safe_join")
 
 SANITIZERS = "\n".join([
     """    pattern-sanitizers:
@@ -129,17 +143,25 @@ SANITIZERS = "\n".join([
           - pattern: $F(..., $X, ...)
           - metavariable-regex:
               metavariable: $F
-              regex: """ + RAISING_VALIDATOR + """
+              regex: """ + RAISING_VALIDATOR + "\n" + "\n".join(
+    f"          - pattern-not: {c}(...)" for c in WERKZEUG_SAFE_JOIN) + """
           - focus-metavariable: $X
       # relative_to raises ValueError when the resolved path is outside the root.
       - by-side-effect: true
         patterns:
           - pattern: $X.resolve(...).relative_to(...)
           - focus-metavariable: $X""",
-    _guard(["not $X.resolve(...).is_relative_to(...)", "not $X.is_relative_to(...)",
-            "$X.resolve(...).parent != $B", "$B != $X.resolve(...).parent",
-            "os.path.commonpath([..., $X, ...]) != $B", "$B != os.path.commonpath([..., $X, ...])"],
-           "A containment guard: `if not X.resolve().is_relative_to(root): raise`, or the parent / commonpath form."),
+    _guard(["not $X.resolve(...).is_relative_to(...)", "$X.resolve(...).parent != $B", "$B != $X.resolve(...).parent",
+            *_commonpath("$X.resolve(...)"), *_commonpath("str($X.resolve(...))")],
+           "A containment guard: `if not X.resolve().is_relative_to(root): raise`, or the parent / commonpath form.\n"
+           "      # Neither is_relative_to() nor commonpath() collapses `..`, so the path they see must be resolved:\n"
+           "      # `if not X.is_relative_to(root)` on an unresolved X passes root / '../../etc/passwd'. A call's result\n"
+           "      # is already untainted (taint_assume_safe_functions), so `p = (root / X).resolve()` needs no form here."),
+    _guard(_commonpath("os.path.$NORM($X)"),
+           "commonpath() over the normalised path: `if os.path.commonpath([root, os.path.realpath(X)]) != root`.",
+           _NORMALISED),
+    _guard([f"{c}(..., $X, ...) is None" for c in WERKZEUG_SAFE_JOIN],
+           "Werkzeug's safe_join returns None for a path outside the root: `if safe_join(root, X) is None: abort(404)`."),
     _guard(["not $F(..., $X, ...)"], "A predicate validator as a rejecting guard: `if not is_safe(X): abort(400)`.",
            "\n          - metavariable-regex:\n              metavariable: $F\n              regex: " + PREDICATE),
     _guard(["$X not in $C"], "An allow-list guard: `if X not in ALLOWED: raise`. A membership test that rejects nothing\n"
@@ -207,7 +229,7 @@ def _url_calls(arg: str) -> str:
     """`- pattern-either:` over the outbound calls, with `arg` as the URL.
 
     `get`/`post`/etc take the URL first, and so does `url=`. `request(method, url)` and
-    `Client.request(method, url)` take it second. `urlopen(url=...)` is the keyword form of both
+    `Client.request(method, url)` take it second, and `Client.request(method=..., url=...)` names both. `urlopen(url=...)` is the keyword form of both
     urlopen spellings.
     """
     out = ["          - pattern-either:"]
@@ -241,6 +263,8 @@ def _url_calls(arg: str) -> str:
         "                  - pattern-either:",
         f"                      - pattern: $C.request($METHOD, {arg}, ...)",
         f"                      - pattern: $C.request($METHOD, url={arg}, ...)",
+        # All keywords: a positional $METHOD never binds a `method=` keyword.
+        f"                      - pattern: $C.request(url={arg}, ...)",
         "                  - metavariable-regex:",
         "                      metavariable: $C",
         f"                      regex: {_CLIENT}",

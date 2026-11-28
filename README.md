@@ -6,6 +6,9 @@ Shared, reusable GitHub Actions workflows for the [Argus suite](https://github.c
 The goal is one place to define the `uv` + `ruff` + `pytest` + `build` pipeline so
 every repo stays in lockstep instead of drifting.
 
+How it fits with the package template, the schema gate and the image rebuilds, with the numbers from 1,347 CI runs:
+[One release pipeline for sixteen packages](https://dragonhound.dev/updates/2026-11-27-one-release-pipeline/).
+
 ## `python-ci.yml`
 
 Reusable CI: lint (ruff), test matrix (pytest over an editable install), and a build
